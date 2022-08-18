@@ -42,6 +42,7 @@
 #      => params: PI controller constants, acceleration/deacc time
 
 import time
+import signal
 import numpy as np
 import RPi.GPIO as GPIO
 
@@ -60,8 +61,47 @@ roller0_pins = {'right': 23, 'left': 24, 'pwm': 18}
 roller_pins = [roller0_pins, roller1_pins, roller2_pins]
 
 pin_sets = [lin_act_pins, *roller_pins]
-
 GPIO.setmode(GPIO.BCM)
+
+
+def calc_wheel_v(drive_v):
+    drive_v[0] = -1 * drive_v[0]  # flip forward-backward
+    wheel_v = np.matmul(trans_mx, drive_v.transpose())
+    wheel_v = wheel_v / np.abs(wheel_v).max()
+
+    wheel_dc = np.abs(wheel_v * 100.)  # duty cycle max 100
+    wheel_dir = roller_dirs[(wheel_v > 0).astype(int)]
+
+    return wheel_dir, wheel_dc
+
+
+def drive(wheel_dir, wheel_dc):
+    # set duty cycle
+    for i, pins in enumerate(roller_pins):
+        GPIO.output(pins['left'], GPIO.LOW)
+        GPIO.output(pins['right'], GPIO.LOW)
+        pwms[i].start(wheel_dc[i])
+
+    # start
+    for i, pins in enumerate(roller_pins):
+        GPIO.output(pins[wheel_dir[i]], GPIO.HIGH)
+
+
+def stop_wheels():
+    for i, pins in enumerate(roller_pins):
+        GPIO.output(pins['left'], GPIO.LOW)
+        GPIO.output(pins['right'], GPIO.LOW)
+        pwms[i].stop()
+
+
+def exit_code(*args):
+    stop_wheels()
+    GPIO.cleanup()
+    print(' -> done')
+    exit(0)
+
+
+signal.signal(signal.SIGINT, exit_code)
 
 # setup
 pwms = []
@@ -79,34 +119,8 @@ for pins in pin_sets:
 print('straight test')
 drive_v = np.array([1., 0., 0.])  # v, vn, w
 
-def calc_wheel_v(drive_v):
-    wheel_v = np.matmul(trans_mx, drive_v.transpose())
-    wheel_v = wheel_v / np.abs(wheel_v).max()
-
-    wheel_dc = np.abs(wheel_v * 100.)  # duty cycle max 100
-    wheel_dir = roller_dirs[(wheel_v > 0).astype(int)]
-
-    return wheel_dir, wheel_dc
-
 wheel_dir, wheel_dc = calc_wheel_v(drive_v)
-
-def drive(wheel_dir, wheel_dc):
-    # set duty cycle
-    for i, pins in enumerate(roller_pins):
-        GPIO.output(pins['left'], GPIO.LOW)
-        GPIO.output(pins['right'], GPIO.LOW)
-        pwms[i].start(wheel_dc[i])
-
-    # start
-    for i, pins in enumerate(roller_pins):
-        GPIO.output(pins[wheel_dir[i]], GPIO.HIGH)
-
-def stop_wheels():
-    for i, pins in enumerate(roller_pins):
-        GPIO.output(pins['left'], GPIO.LOW)
-        GPIO.output(pins['right'], GPIO.LOW)
-        pwms[i].stop()
-
+print(wheel_dir, wheel_dc)
 drive(wheel_dir, wheel_dc)
 time.sleep(5)
 stop_wheels()
@@ -117,6 +131,7 @@ print('right strafe test')
 drive_v = np.array([0., -1., 0.])  # v, vn, w  # TODO -1 ?
 
 wheel_dir, wheel_dc = calc_wheel_v(drive_v)
+print(wheel_dir, wheel_dc)
 drive(wheel_dir, wheel_dc)
 time.sleep(5)
 stop_wheels()
@@ -127,6 +142,7 @@ print('right strafe test')
 drive_v = np.array([0., 1., 0.])  # v, vn, w
 
 wheel_dir, wheel_dc = calc_wheel_v(drive_v)
+print(wheel_dir, wheel_dc)
 drive(wheel_dir, wheel_dc)
 time.sleep(5)
 stop_wheels()
@@ -137,33 +153,26 @@ print('counter-clockwise turn test')
 drive_v = np.array([0., 0., 1.])  # v, vn, w
 
 wheel_dir, wheel_dc = calc_wheel_v(drive_v)
+print(wheel_dir, wheel_dc)
 drive(wheel_dir, wheel_dc)
 time.sleep(5)
 stop_wheels()
 time.sleep(2)
 
 # clockwise turn test
-print('counter-clockwise turn test')
+print('clockwise turn test')
 drive_v = np.array([0., 0., -1.])  # v, vn, w
 
 wheel_dir, wheel_dc = calc_wheel_v(drive_v)
+print(wheel_dir, wheel_dc)
 drive(wheel_dir, wheel_dc)
 time.sleep(5)
 stop_wheels()
 time.sleep(2)
 
-# clockwise turn test
-print('counter-clockwise turn test')
-drive_v = np.array([0., 0., -1.])  # v, vn, w
-
-wheel_dir, wheel_dc = calc_wheel_v(drive_v)
-drive(wheel_dir, wheel_dc)
-time.sleep(5)
-stop_wheels()
-time.sleep(2)
 
 # done
-GPIO.cleanup()
+exit_code()
 
 # TODO try hardware pwm in C?
 #   https://www.electronicwings.com/raspberry-pi/raspberry-pi-pwm-generation-using-python-and-c
