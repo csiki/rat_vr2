@@ -1,181 +1,152 @@
-# simple "turn and move straight" dynamics and motion planning
-#   A) to construct the motion map, manually run through the game map a couple times,
-#      record paths, take points from the paths, divide map into squares,
-#      cluster points inside squares into single mean point,
-#      register paths between touching squares (diagonals too), and take mean path between;
-#      have an optimal run, register squares passed and that should be the final motion plan
-#   B) hand-design a graph on the map with positions and connections between, then define sequence of points as motion
-#   => once optimal motion with sequence of steps is available,
-#      every step taken negates the necessity to do the prev steps
-#   -- enable backward movement in some cases: typically when there is an overshoot of movement
-#      that can be fixed with a small (< X) backward movement, where the correct angle of movement is <20 degrees
-#      off from the backward direction => make such correction movements smooth turning and movement at the same time
-
-# trapezoidal velocity change to constant, predefined velocity
-#   wheel acceleration/deacc should be the same as the acceleration/deacc in Doom to simplify speed transfer
-# feedforward + PI feedback control: first turn then move
-
-# if there is a height differential between roller vs bearing ball mount, which should be minimized 'cause screen..
-#   place motion sensors (back and left side) at the different heights;
-#   forward/backward readings will work no matter what on the back sensor,
-#   strafe roll readings will work on the left sensor,
-#   take turn readings from the sensor at height corresponding to the roller or bearing mount to be more accurate
-
-# according to:
-#   https://www.researchgate.net/publication/256089847_Dynamical_Models_for_Omni-directional_Robots_with_3_and_4_Wheels
-# ball position: x, y, theta -> irrelevant
-# game position: xg, yg, theta_g -> given
-#   xg = Gx * x; yg = Gy * y; theta ~= theta_g
-
-# game linear motion vector -> delta movement of ball -> ball velocity planning
-#   -> wheel speeds calc -> START -> read motion sensor -> game movement -> read game position
-#   -> calc motion error -...-> adjust wheel speeds
-
-# calibrate w/o a rat on:
-#   1) fit direction: on each axis the planned direction of constant motion should be the same as the sensed motion
-#      => params: elements of the matrix in eq 2 of the paper above
-#      => how: input is vt, vnt, wt; output is v0, v1, v2; params in the mx;
-#   2) fit full turn: draw a vertical line on ball, turn the ball around until the line shows again
-#                     auto or manual detection of line; if possible, use the sensor's absolute pos measurement
-#      => derive: (sensed) motion / degree
-#   3) fit acc/deacc: make the ball move the same amount as the character in-game times a predefined constant
-#      => params: PI controller constants, acceleration/deacc time
-
 import time
 import signal
+import sched
 import numpy as np
 import RPi.GPIO as GPIO
 
-roller_dirs = np.array(['left', 'right'])
-d = (10. + 6.75) / 100.  # m, wheel distance
-trans_mx = np.array(
-    [[-np.sin(np.pi / 3), np.cos(np.pi / 3), d],
-     [0, -1, d],
-     [np.sin(np.pi / 3), np.cos(np.pi / 3), d]]
-)
 
-lin_act_pins = {'up': 27, 'down': 4}
-roller2_pins = {'right': 25, 'left': 26, 'pwm': 12}
-roller1_pins = {'right': 5, 'left': 6, 'pwm': 13}
-roller0_pins = {'right': 23, 'left': 24, 'pwm': 18}
-roller_pins = [roller0_pins, roller1_pins, roller2_pins]
+class OmniDrive:
+    def __init__(self, roller_pins, lin_act_pins, up_trans_t=6, down_trans_t=5, pwm_freq=1000):
 
-pin_sets = [lin_act_pins, *roller_pins]
-GPIO.setmode(GPIO.BCM)
+        self.roller_dirs = np.array(['left', 'right'])
+        self.d = (10. + 6.75) / 100.  # m, wheel distance
+        self.trans_mx = np.array(
+            [[-np.sin(np.pi / 3), np.cos(np.pi / 3), self.d],
+             [0, -1, self.d],
+             [np.sin(np.pi / 3), np.cos(np.pi / 3), self.d]]
+        )
 
+        self.roller_pins = roller_pins
+        self.lin_act_pins = lin_act_pins
 
-def calc_wheel_v(drive_v):
-    drive_v[0] = -1 * drive_v[0]  # flip forward-backward
-    wheel_v = np.matmul(trans_mx, drive_v.transpose())
-    wheel_v = wheel_v / np.abs(wheel_v).max()
+        self.up_trans_t = up_trans_t
+        self.down_trans_t = down_trans_t
+        self.pwm_freq = pwm_freq
+        self.pwms = None
+        self.scheduler = sched.scheduler(time.time, time.sleep)
 
-    wheel_dc = np.abs(wheel_v * 100.)  # duty cycle max 100
-    wheel_dir = roller_dirs[(wheel_v > 0).astype(int)]
+        GPIO.setmode(GPIO.BCM)
 
-    return wheel_dir, wheel_dc
+    def setup(self):
+        pin_sets = [self.lin_act_pins, *self.roller_pins]
+        self.pwms = []
 
+        for pins in pin_sets:
+            for n in pins.values():
+                GPIO.setup(n, GPIO.OUT, initial=GPIO.LOW)
 
-def drive(wheel_dir, wheel_dc):
-    # set duty cycle
-    for i, pins in enumerate(roller_pins):
-        GPIO.output(pins['left'], GPIO.LOW)
-        GPIO.output(pins['right'], GPIO.LOW)
-        pwms[i].start(wheel_dc[i])
+            # pwms
+            if 'pwm' in pins:
+                pwm = GPIO.PWM(pins['pwm'], self.pwm_freq)
+                self.pwms.append(pwm)
 
-    # start
-    for i, pins in enumerate(roller_pins):
-        GPIO.output(pins[wheel_dir[i]], GPIO.HIGH)
+        print('OmniDrive setup done')
 
+    def calc_wheel_v(self, drive_v):
+        drive_v[0] = -1 * drive_v[0]  # flip forward-backward
+        wheel_v = np.matmul(self.trans_mx, drive_v.transpose())
+        wheel_v = wheel_v / np.abs(wheel_v).max()
 
-def stop_wheels():
-    for i, pins in enumerate(roller_pins):
-        GPIO.output(pins['left'], GPIO.LOW)
-        GPIO.output(pins['right'], GPIO.LOW)
-        pwms[i].stop()
+        wheel_dc = np.abs(wheel_v * 100.)  # duty cycle max 100
+        wheel_dir = self.roller_dirs[(wheel_v > 0).astype(int)]
 
+        return wheel_dir, wheel_dc
 
-def exit_code(*args):
-    stop_wheels()
-    GPIO.cleanup()
-    print(' -> done')
-    exit(0)
+    def drive(self, wheel_dir, wheel_dc, t=None, blocking=False):
+        # set duty cycle
+        for i, pins in enumerate(self.roller_pins):
+            GPIO.output(pins['left'], GPIO.LOW)
+            GPIO.output(pins['right'], GPIO.LOW)
+            self.pwms[i].start(wheel_dc[i])
 
+        # start
+        for i, pins in enumerate(self.roller_pins):
+            GPIO.output(pins[wheel_dir[i]], GPIO.HIGH)
 
-signal.signal(signal.SIGINT, exit_code)
+        # stop
+        if t is not None and blocking:
+            time.sleep(t)
+            self.stop()
+        elif t is not None and not blocking:
+            self.scheduler.enter(t, 1, self.stop)
 
-# setup
-pwms = []
-pwm_freq = 1000
-for pins in pin_sets:
-    for n in pins.values():
-        GPIO.setup(n, GPIO.OUT, initial=GPIO.LOW)
+    def stop(self):
+        for i, pins in enumerate(self.roller_pins):
+            GPIO.output(pins['left'], GPIO.LOW)
+            GPIO.output(pins['right'], GPIO.LOW)
+            self.pwms[i].stop()
 
-    # setup pwms
-    if 'pwm' in pins:
-        pwm = GPIO.PWM(pins['pwm'], pwm_freq)
-        pwms.append(pwm)
-
-# straight test
-print('straight test')
-drive_v = np.array([1., 0., 0.])  # v, vn, w
-
-wheel_dir, wheel_dc = calc_wheel_v(drive_v)
-print(wheel_dir, wheel_dc)
-drive(wheel_dir, wheel_dc)
-time.sleep(5)
-stop_wheels()
-time.sleep(2)
-
-# right strafe test
-print('right strafe test')
-drive_v = np.array([0., -1., 0.])  # v, vn, w  # TODO -1 ?
-
-wheel_dir, wheel_dc = calc_wheel_v(drive_v)
-print(wheel_dir, wheel_dc)
-drive(wheel_dir, wheel_dc)
-time.sleep(5)
-stop_wheels()
-time.sleep(2)
-
-# left strafe test
-print('right strafe test')
-drive_v = np.array([0., 1., 0.])  # v, vn, w
-
-wheel_dir, wheel_dc = calc_wheel_v(drive_v)
-print(wheel_dir, wheel_dc)
-drive(wheel_dir, wheel_dc)
-time.sleep(5)
-stop_wheels()
-time.sleep(2)
-
-# counter-clockwise turn test
-print('counter-clockwise turn test')
-drive_v = np.array([0., 0., 1.])  # v, vn, w
-
-wheel_dir, wheel_dc = calc_wheel_v(drive_v)
-print(wheel_dir, wheel_dc)
-drive(wheel_dir, wheel_dc)
-time.sleep(5)
-stop_wheels()
-time.sleep(2)
-
-# clockwise turn test
-print('clockwise turn test')
-drive_v = np.array([0., 0., -1.])  # v, vn, w
-
-wheel_dir, wheel_dc = calc_wheel_v(drive_v)
-print(wheel_dir, wheel_dc)
-drive(wheel_dir, wheel_dc)
-time.sleep(5)
-stop_wheels()
-time.sleep(2)
+    def cleanup(self):
+        self.stop()
+        GPIO.cleanup()
+        print('OmniDrive cleanup done')
 
 
-# done
-exit_code()
+def wheel_tests(omni_drive: OmniDrive):
+    # straight test
+    print('straight test')
+    drive_v = np.array([1., 0., 0.])  # v, vn, w
 
-# TODO try hardware pwm in C?
-#   https://www.electronicwings.com/raspberry-pi/raspberry-pi-pwm-generation-using-python-and-c
+    wheel_dir, wheel_dc = omni_drive.calc_wheel_v(drive_v)
+    print(wheel_dir, wheel_dc)
+    omni_drive.drive(wheel_dir, wheel_dc, 5, blocking=True)
+    time.sleep(2)
 
-# TODO class OmniDrive:
+    # right strafe test
+    print('right strafe test')
+    drive_v = np.array([0., 1., 0.])  # v, vn, w
 
+    wheel_dir, wheel_dc = omni_drive.calc_wheel_v(drive_v)
+    print(wheel_dir, wheel_dc)
+    omni_drive.drive(wheel_dir, wheel_dc, 5, blocking=True)
+    time.sleep(2)
+
+    # left strafe test
+    print('left strafe test')
+    drive_v = np.array([0., -1., 0.])  # v, vn, w
+
+    wheel_dir, wheel_dc = omni_drive.calc_wheel_v(drive_v)
+    print(wheel_dir, wheel_dc)
+    omni_drive.drive(wheel_dir, wheel_dc, 5, blocking=True)
+    time.sleep(2)
+
+    # counter-clockwise turn test
+    print('counter-clockwise turn test')
+    drive_v = np.array([0., 0., 1.])  # v, vn, w
+
+    wheel_dir, wheel_dc = omni_drive.calc_wheel_v(drive_v)
+    print(wheel_dir, wheel_dc)
+    omni_drive.drive(wheel_dir, wheel_dc, 5, blocking=True)
+    time.sleep(2)
+
+    # clockwise turn test
+    print('clockwise turn test')
+    drive_v = np.array([0., 0., -1.])  # v, vn, w
+
+    wheel_dir, wheel_dc = omni_drive.calc_wheel_v(drive_v)
+    print(wheel_dir, wheel_dc)
+    omni_drive.drive(wheel_dir, wheel_dc, 5, blocking=True)
+    time.sleep(2)
+
+
+def main():
+    lin_act_pins = {'up': 22, 'down': 4, 'enable': 27}
+    roller0_pins = {'right': 23, 'left': 24, 'pwm': 18}
+    roller1_pins = {'right': 5, 'left': 6, 'pwm': 13}
+    roller2_pins = {'right': 25, 'left': 26, 'pwm': 12}
+    roller_pins = [roller0_pins, roller1_pins, roller2_pins]
+
+    omni_drive = OmniDrive(roller_pins, lin_act_pins, up_trans_t=6, down_trans_t=6, pwm_freq=1000)
+    omni_drive.setup()
+
+    def exit_code(*args):
+        omni_drive.cleanup()
+        exit(0)
+
+    signal.signal(signal.SIGINT, exit_code)
+
+    wheel_tests(omni_drive)
+
+
+if __name__ == '__main__':
+    main()
