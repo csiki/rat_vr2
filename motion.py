@@ -1,26 +1,47 @@
 import time
 import argparse
+import numpy as np
 from pmw3901 import PMW3901, PAA5100, BG_CS_FRONT_BCM, BG_CS_BACK_BCM
 
 
-def get_front_motion_sensor():
-    SensorClass = PAA5100
-    spi_slot = 'front'
+class MotionSensor:
+    def __init__(self, spi_port, spi_slot, sensor_class=PAA5100):
+        # spi_port=0, spi_slot='front' for the front sensor
+        self.sensor = sensor_class(spi_port=spi_port, spi_cs=1,
+                                   spi_cs_gpio=BG_CS_FRONT_BCM if spi_slot == 'front' else BG_CS_BACK_BCM)
+        self.sensor.set_orientation(invert_x=True, invert_y=False, swap_xy=False)
 
-    flo = SensorClass(spi_port=0, spi_cs=1, spi_cs_gpio=BG_CS_FRONT_BCM if spi_slot == 'front' else BG_CS_BACK_BCM)
-    flo.set_orientation(invert_x=True, invert_y=False, swap_xy=False)
+        self.rel_x, self.rel_y = 0, 0
+        self.abs_x, self.abs_y = 0, 0
 
-    return flo
+    def loop(self):
+        try:
+            x, y = self.sensor.get_motion(timeout=0.001)
+            self.rel_x += x
+            self.rel_y += y
+            self.abs_x += x
+            self.abs_y += y
+        except RuntimeError:
+            pass
+
+    def get_rel_motion(self):
+        ret = np.array([self.rel_x, self.rel_y])
+        self.rel_x = self.rel_y = 0  # reset
+        return ret
+
+    def get_abs_motion(self):
+        return np.array([self.abs_x, self.abs_y])
 
 
 def get_side_motion_sensor():
     pass  # TODO
 
 
-def _main():
+def _main():  # example code with OmniDrive
+
     from omni_drive import OmniDrive
 
-    flo = get_front_motion_sensor()
+    flo = MotionSensor(0, 'front')
 
     lin_act_pins = {'up': 22, 'down': 4, 'enable': 27}
     roller0_pins = {'right': 23, 'left': 24, 'pwm': 18}
@@ -44,15 +65,15 @@ def _main():
     try:
         while True:
             try:
-                x, y = flo.get_motion()
+                omni_drive.loop()
+                flo.loop()
             except RuntimeError:
                 continue
-            tx += x
-            ty += y
 
-            cx += x
-            cy += y
+            tx, ty = flo.get_abs_motion()
+
             if c >= 150:
+                cx, cy = flo.get_rel_motion()
                 # print("Relative: cx {:03d} cy {:03d} | Absolute: x {:03d} y {:03d}".format(cx, cy, tx, ty))
                 cx = cy = c = 0
 
@@ -64,7 +85,6 @@ def _main():
 
             c += 1
             time.sleep(0.1)
-            omni_drive.loop()
 
     except KeyboardInterrupt:
         omni_drive.cleanup()

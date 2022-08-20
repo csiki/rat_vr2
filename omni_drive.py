@@ -6,7 +6,7 @@ import numpy as np
 import RPi.GPIO as GPIO
 
 from actuator import LinActuator
-from motion import get_front_motion_sensor, get_side_motion_sensor
+from motion import get_front_motion_sensor, get_side_motion_sensor, MotionSensor
 
 
 class OmniDrive:
@@ -18,7 +18,8 @@ class OmniDrive:
                             'left_turn': [0., 0., -1.], 'right_turn': [0., 0., 1.]}
         self.simple_dirs = {k: np.array(v) for k, v in self.simple_dirs.items()}
 
-        self.d = (10. + 6.75) / 100.  # m, wheel distance
+        self.def_d = (10. + 6.75) / 100.  # m, wheel distance
+        self.d = self.def_d
         # self.trans_mx = self._get_trans_mx()
 
         self.roller_pins = roller_pins
@@ -115,7 +116,7 @@ class OmniDrive:
         wheel_dir, wheel_dc = self.calc_wheel_v(drive_v)
         self.drive(wheel_dir, wheel_dc, t, blocking, callback)
 
-    def trapesoid_accelerate(self):
+    def trapesoid_accelerate(self):  # TODO solve it in the loop()
         pass  # TODO
 
     def stop(self):
@@ -136,18 +137,44 @@ class OmniDrive:
         GPIO.cleanup()
         print('OmniDrive cleanup done')
 
-    def calibrate_direction(self):
-        flo = get_front_motion_sensor()
+    def calibrate_direction(self):  # TODO test this
+        flo = MotionSensor(0, 'front')
 
-        # TODO capture dominant axis / not dominant axis ratio; try to minimize it by trying different d values
-        #   first then add the pi/3 as an extra opt param if necessary;
-        #   have the d values and corresponding ratios printed in an array format, so they can be analyzed in
-        #   matplotlib locally with copy-pasting - later just use argmax, only for testing now have the plotting
+        rng = self.def_d * .5
+        ds = np.linspace(self.def_d - rng, self.def_d + rng, 10)
+        dirs_to_try = ['forward', 'backward', 'turn_left', 'turn_right']  # TODO try strafe l/r w/ other motion sensor
+        front_motion_dir_dominance = [self.simple_dirs[dir_].abs()[[0, 2]] for dir_ in dirs_to_try]
+        dir_motion_matches = [[] for _ in dirs_to_try]  # inner list ordered as ds
 
-        # TODO use the other motion sensor too: get_side_motion_sensor
+        for d in ds:
+            self.d = d
+
+            for dir_i, (dir_, dom) in enumerate(zip(dirs_to_try, front_motion_dir_dominance)):
+                self.simple_drive(dir_, t=5, blocking=False)
+
+                try:
+                    while self.driving:
+                        flo.loop()
+                        self.loop()
+                        time.sleep(0.1)
+                    flo.loop()
+
+                    motion = flo.get_rel_motion()
+                    motion_match = (motion * dom/dom.sum()) / motion.sum()
+                    dir_motion_matches[dir_i].append(motion_match)
+
+                except KeyboardInterrupt:
+                    self.stop()
+
+        mean_motion_matches = np.array(dir_motion_matches).mean(axis=0)  # mean across directions
+
+        # TODO rm, only for local matplotlib visualization and testing
+        print('Diameters:', ds.tolist())
+        print('Mean motion matches:', mean_motion_matches.tolist())
+        print('Directions:', dirs_to_try)
+        print('All motion matches:', dir_motion_matches)
 
         # TODO after param optimization is done, set lvl of ignorance to avoid noise
-
 
     def calibrate_full_turn(self):
         pass  # TODO
