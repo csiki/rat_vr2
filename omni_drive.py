@@ -20,6 +20,7 @@ class OmniDrive:
 
         self.def_d = (10. + 6.75) / 100.  # m, wheel distance
         self.d = self.def_d
+        self.noise_floors = np.zeros(3)  # 3 axes
         # self.trans_mx = self._get_trans_mx()
 
         self.roller_pins = roller_pins
@@ -145,6 +146,7 @@ class OmniDrive:
         dirs_to_try = ['forward', 'backward', 'turn_left', 'turn_right']  # TODO try strafe l/r w/ other motion sensor
         front_motion_dir_dominance = [self.simple_dirs[dir_].abs()[[0, 2]] for dir_ in dirs_to_try]
         dir_motion_matches = [[] for _ in dirs_to_try]  # inner list ordered as ds
+        axis_noise_floors = [[] for _ in range(2)]  # inner list ordered as motion sensed axes
 
         for d in ds:
             self.d = d
@@ -163,6 +165,10 @@ class OmniDrive:
                     motion_match = (motion * dom/dom.sum()) / motion.sum()
                     dir_motion_matches[dir_i].append(motion_match)
 
+                    noise_floor = motion[dom == 0].sum()
+                    for axis_i in np.where(dom == 0)[0]:
+                        axis_noise_floors[axis_i].append(noise_floor)
+
                 except KeyboardInterrupt:
                     self.stop()
 
@@ -174,7 +180,16 @@ class OmniDrive:
         print('Directions:', dirs_to_try)
         print('All motion matches:', dir_motion_matches)
 
-        # TODO after param optimization is done, set lvl of ignorance to avoid noise
+        # select diameter with the best performance
+        self.d = ds[np.argmax(mean_motion_matches)]
+        print(f'Direction calibration done; best diameter selected: {self.d:.03f}')
+
+        # set lvl of ignorance to avoid noise; only look at noise at the selected best diameter for each axis
+        mean_noise_floors = np.array(axis_noise_floors).mean(axis=1)  # per axis
+        self.noise_floors[[0, 2]] = mean_noise_floors  # TODO compute it also for strafe axis with other sensor
+
+        # TODO actually do something with noise floors
+
 
     def calibrate_full_turn(self):
         pass  # TODO
