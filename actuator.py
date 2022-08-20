@@ -34,6 +34,9 @@ class LinActuator:
         GPIO.output(self.pins['up'], GPIO.LOW)
         GPIO.output(self.pins['down'], GPIO.LOW)
 
+    def loop(self):
+        self.scheduler.run(blocking=False)
+
     def cleanup(self):
         self.stop()
         GPIO.cleanup()

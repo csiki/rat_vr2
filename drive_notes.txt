@@ -1,0 +1,42 @@
+# simple "turn and move straight" dynamics and motion planning
+#   A) to construct the motion map, manually run through the game map a couple times,
+#      record paths, take points from the paths, divide map into squares,
+#      cluster points inside squares into single mean point,
+#      register paths between touching squares (diagonals too), and take mean path between;
+#      have an optimal run, register squares passed and that should be the final motion plan
+#   B) hand-design a graph on the map with positions and connections between, then define sequence of points as motion
+#   => once optimal motion with sequence of steps is available,
+#      every step taken negates the necessity to do the prev steps
+#   -- enable backward movement in some cases: typically when there is an overshoot of movement
+#      that can be fixed with a small (< X) backward movement, where the correct angle of movement is <20 degrees
+#      off from the backward direction => make such correction movements smooth turning and movement at the same time
+
+# trapezoidal velocity change to constant, predefined velocity
+#   wheel acceleration/deacc should be the same as the acceleration/deacc in Doom to simplify speed transfer
+# feedforward + PI feedback control: first turn then move
+
+# if there is a height differential between roller vs bearing ball mount, which should be minimized 'cause screen..
+#   place motion sensors (back and left side) at the different heights;
+#   forward/backward readings will work no matter what on the back sensor,
+#   strafe roll readings will work on the left sensor,
+#   take turn readings from the sensor at height corresponding to the roller or bearing mount to be more accurate
+
+# according to:
+#   https://www.researchgate.net/publication/256089847_Dynamical_Models_for_Omni-directional_Robots_with_3_and_4_Wheels
+# ball position: x, y, theta -> irrelevant
+# game position: xg, yg, theta_g -> given
+#   xg = Gx * x; yg = Gy * y; theta ~= theta_g
+
+# game linear motion vector -> delta movement of ball -> ball velocity planning
+#   -> wheel speeds calc -> START -> read motion sensor -> game movement -> read game position
+#   -> calc motion error -...-> adjust wheel speeds
+
+# calibrate w/o a rat on:
+#   1) fit direction: on each axis the planned direction of constant motion should be the same as the sensed motion
+#      => params: elements of the matrix in eq 2 of the paper above
+#      => how: input is vt, vnt, wt; output is v0, v1, v2; params in the mx;
+#   2) fit full turn: draw a vertical line on ball, turn the ball around until the line shows again
+#                     auto or manual detection of line; if possible, use the sensor's absolute pos measurement
+#      => derive: (sensed) motion / degree
+#   3) fit acc/deacc: make the ball move the same amount as the character in-game times a predefined constant
+#      => params: PI controller constants, acceleration/deacc time
