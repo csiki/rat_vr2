@@ -2,5 +2,8 @@ numpy
 pandas
 matplotlib
 
+sklearn
+bayesian-optimization
+
 RPi.GPIO
 pmw3901

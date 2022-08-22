@@ -11,12 +11,14 @@ class MotionSensor:
                                    spi_cs_gpio=BG_CS_FRONT_BCM if spi_slot == 'front' else BG_CS_BACK_BCM)
         self.sensor.set_orientation(invert_x=True, invert_y=False, swap_xy=False)
 
+        self.last_rel_t, self.last_rec = time.time(), 0
         self.rel_x, self.rel_y = 0, 0
         self.abs_x, self.abs_y = 0, 0
 
     def loop(self):
         try:
             x, y = self.sensor.get_motion(timeout=0.001)
+            self.last_rec = time.time()
             self.rel_x += x
             self.rel_y += y
             self.abs_x += x
@@ -24,17 +26,19 @@ class MotionSensor:
         except RuntimeError:
             pass
 
-    def get_rel_motion(self):
-        ret = np.array([self.rel_x, self.rel_y])
+    def get_rel_motion(self, get_dt=False):
+        ret_mot = np.array([self.rel_x, self.rel_y])
         self.rel_x = self.rel_y = 0  # reset
-        return ret
+
+        dt = self.last_rec - self.last_rel_t
+        self.last_rel_t = time.time()
+
+        if get_dt:
+            return ret_mot, dt
+        return ret_mot
 
     def get_abs_motion(self):
         return np.array([self.abs_x, self.abs_y])
-
-
-def get_side_motion_sensor():
-    pass  # TODO
 
 
 def _main():  # example code with OmniDrive
@@ -53,13 +57,9 @@ def _main():  # example code with OmniDrive
     omni_drive.setup()
     omni_drive.simple_drive('forward', t=10, blocking=False)
 
-    tx = 0
-    ty = 0
-
     cx = 0
     cy = 0
     c = 0
-
     tprev = 0
 
     try:

@@ -6,7 +6,7 @@ import numpy as np
 import RPi.GPIO as GPIO
 
 from actuator import LinActuator
-from motion import get_front_motion_sensor, get_side_motion_sensor, MotionSensor
+from motion import MotionSensor
 
 
 class OmniDrive:
@@ -20,7 +20,7 @@ class OmniDrive:
 
         self.def_d = (10. + 6.75) / 100.  # m, wheel distance
         self.d = self.def_d
-        self.noise_floors = np.zeros(3)  # 3 axes
+        self.noise_floors = np.zeros(3)  # noise/second; 3 axes
         # self.trans_mx = self._get_trans_mx()
 
         self.roller_pins = roller_pins
@@ -138,21 +138,29 @@ class OmniDrive:
         GPIO.cleanup()
         print('OmniDrive cleanup done')
 
+    # TODO need to calibrate whether the direction is right: forward vs backward, right vs left
+    #   this one calibrates hyperparams of the trans_mx --> rename this and make a calibrate direction function
+    # TODO LATER: also calibrate pi/3, not just d... USE BAYESIAN OPT: use the BayesianOptimization package
     def calibrate_direction(self):  # TODO test this
         flo = MotionSensor(0, 'front')
 
         rng = self.def_d * .5
+        drive_t = 5
         ds = np.linspace(self.def_d - rng, self.def_d + rng, 10)
-        dirs_to_try = ['forward', 'backward', 'turn_left', 'turn_right']  # TODO try strafe l/r w/ other motion sensor
-        front_motion_dir_dominance = [self.simple_dirs[dir_].abs()[[0, 2]] for dir_ in dirs_to_try]
+        dirs_to_try = ['forward', 'backward', 'left_turn', 'right_turn']  # TODO try strafe l/r w/ other motion sensor
+
+        front_motion_dir_dominance = [np.abs(self.simple_dirs[dir_][[0, 2]]) for dir_ in dirs_to_try]
         dir_motion_matches = [[] for _ in dirs_to_try]  # inner list ordered as ds
         axis_noise_floors = [[] for _ in range(2)]  # inner list ordered as motion sensed axes
-
-        for d in ds:
+        
+        print('Number of diameters to try:', len(ds))
+        
+        for di, d in enumerate(ds):
             self.d = d
+            print(f'{di}: d = {d:.3f}')
 
             for dir_i, (dir_, dom) in enumerate(zip(dirs_to_try, front_motion_dir_dominance)):
-                self.simple_drive(dir_, t=5, blocking=False)
+                self.simple_drive(dir_, t=drive_t, blocking=False)
 
                 try:
                     while self.driving:
@@ -161,9 +169,10 @@ class OmniDrive:
                         time.sleep(0.1)
                     flo.loop()
 
-                    motion = flo.get_rel_motion()
-                    motion_match = (motion * dom/dom.sum()) / motion.sum()
-                    dir_motion_matches[dir_i].append(motion_match)
+                    # motion abs: assumes that the camera is rotated right: no diff here made of forward vs backward
+                    motion = np.abs(flo.get_rel_motion())
+                    motion_match = ((motion * (dom/dom.sum())) / motion.sum()).sum()
+                    dir_motion_matches[dir_i].append(motion_match.tolist())
 
                     noise_floor = motion[dom == 0].sum()
                     for axis_i in np.where(dom == 0)[0]:
@@ -182,11 +191,12 @@ class OmniDrive:
 
         # select diameter with the best performance
         self.d = ds[np.argmax(mean_motion_matches)]
-        print(f'Direction calibration done; best diameter selected: {self.d:.03f}')
+        print(f'Direction calibration done; best diameter selected: {self.d:.03f}; default was {self.def_d:.03f}')
 
         # set lvl of ignorance to avoid noise; only look at noise at the selected best diameter for each axis
         mean_noise_floors = np.array(axis_noise_floors).mean(axis=1)  # per axis
-        self.noise_floors[[0, 2]] = mean_noise_floors  # TODO compute it also for strafe axis with other sensor
+        self.noise_floors[[0, 2]] = mean_noise_floors / drive_t  # TODO compute it also for strafe axis with other sensor
+        print('Noise floor:', self.noise_floors[[0, 2]].tolist())
 
         # TODO actually do something with noise floors
 
@@ -261,7 +271,10 @@ def _main():
 
     signal.signal(signal.SIGINT, exit_code)
 
-    wheel_tests(omni_drive)
+    omni_drive.calibrate_direction()
+
+    # tests
+    # wheel_tests(omni_drive)
 
 
 if __name__ == '__main__':
