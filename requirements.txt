@@ -4,6 +4,11 @@ matplotlib
 
 sklearn
 bayesian-optimization
+torch
 
 RPi.GPIO
 pmw3901
+
+# setting up spi ports:
+#   sudo nano /boot/config.txt
+#   uncomment line "dtparam=spi=on"

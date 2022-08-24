@@ -4,6 +4,7 @@ import signal
 import sched
 import numpy as np
 import RPi.GPIO as GPIO
+import torch
 
 from actuator import LinActuator
 from motion import MotionSensor
@@ -21,7 +22,11 @@ class OmniDrive:
         self.def_d = (10. + 6.75) / 100.  # m, wheel distance
         self.d = self.def_d
         self.noise_floors = np.zeros(3)  # noise/second; 3 axes
-        # self.trans_mx = self._get_trans_mx()
+        self.trans_mx = np.array(
+            [[-np.sin(np.pi / 3), np.cos(np.pi / 3), self.d],
+             [0, -1, self.d],
+             [np.sin(np.pi / 3), np.cos(np.pi / 3), self.d]]
+        )
 
         self.roller_pins = roller_pins
 
@@ -36,13 +41,6 @@ class OmniDrive:
         self.lin_act = LinActuator(lin_act_pins)
 
         GPIO.setmode(GPIO.BCM)
-
-    def _get_trans_mx(self):
-        return np.array(
-            [[-np.sin(np.pi / 3), np.cos(np.pi / 3), self.d],
-             [0, -1, self.d],
-             [np.sin(np.pi / 3), np.cos(np.pi / 3), self.d]]
-        )
 
     def setup(self):
         self.pwms = []
@@ -76,13 +74,13 @@ class OmniDrive:
 
         drive_v[0] = -1 * drive_v[0]  # flip forward-backward
 
-        wheel_v = np.matmul(self._get_trans_mx(), drive_v.transpose())
-        wheel_v = wheel_v / np.abs(wheel_v).max() * highest_abs_v  # normalize then scale back to requested velocity
+        wheel_v = np.matmul(self.trans_mx, drive_v.transpose())
+        wheel_v_normed = wheel_v / np.abs(wheel_v).max() * highest_abs_v  # normalize then scale back to requested velocity
 
-        wheel_dc = np.abs(wheel_v * 100.)  # duty cycle max 100
-        wheel_dir = self.roller_dirs[(wheel_v > 0).astype(int)]
+        wheel_dc = np.abs(wheel_v_normed * 100.)  # duty cycle max 100
+        wheel_dir = self.roller_dirs[(wheel_v_normed > 0).astype(int)]
 
-        return wheel_dir, wheel_dc
+        return wheel_dir, wheel_dc, wheel_v, wheel_v_normed
 
     def drive(self, wheel_dir, wheel_dc, t=None, blocking=False, callback=None):
         # set duty cycle
@@ -114,7 +112,7 @@ class OmniDrive:
         print(f'Drive {simple_dir} for {t} seconds')
 
         drive_v = self.simple_dirs[simple_dir]
-        wheel_dir, wheel_dc = self.calc_wheel_v(drive_v)
+        wheel_dir, wheel_dc, _, _ = self.calc_wheel_v(drive_v)
         self.drive(wheel_dir, wheel_dc, t, blocking, callback)
 
     def trapesoid_accelerate(self):  # TODO solve it in the loop()
@@ -141,7 +139,7 @@ class OmniDrive:
     # TODO need to calibrate whether the direction is right: forward vs backward, right vs left
     #   this one calibrates hyperparams of the trans_mx --> rename this and make a calibrate direction function
     # TODO LATER: also calibrate pi/3, not just d... USE BAYESIAN OPT: use the BayesianOptimization package
-    def calibrate_direction(self):  # TODO test this
+    def calibrate_transfer_fun(self):  # TODO test this
         flo = MotionSensor(0, 'front')
 
         rng = self.def_d * .5
@@ -160,7 +158,7 @@ class OmniDrive:
             print(f'{di}: d = {d:.3f}')
 
             for dir_i, (dir_, dom) in enumerate(zip(dirs_to_try, front_motion_dir_dominance)):
-                self.simple_drive(dir_, t=drive_t, blocking=False)
+                wheel_v = self.simple_drive(dir_, t=drive_t, blocking=False)
 
                 try:
                     while self.driving:
@@ -196,10 +194,84 @@ class OmniDrive:
         # set lvl of ignorance to avoid noise; only look at noise at the selected best diameter for each axis
         mean_noise_floors = np.array(axis_noise_floors).mean(axis=1)  # per axis
         self.noise_floors[[0, 2]] = mean_noise_floors / drive_t  # TODO compute it also for strafe axis with other sensor
-        print('Noise floor:', self.noise_floors[[0, 2]].tolist())
+        print('Noise floor:', self.noise_floors.tolist())
 
         # TODO actually do something with noise floors
 
+    def calibrate_transfer_fun2(self):
+        import omni_transfer
+
+        flo = MotionSensor(0, 'front')
+        drive_t = 5
+        niter = 50
+        dirs_to_try = ['forward', 'backward', 'left_turn', 'right_turn']  # TODO try strafe l/r w/ other motion sensor
+        desired_motion = [self.simple_dirs[dir_] for dir_ in dirs_to_try]  # not abs
+        # desired_motion = torch.reshape(torch.tensor(desired_motion), (len(dirs_to_try), 3, 1))
+
+        # setup nn
+        trans = omni_transfer.OmniTransfer(self.def_d)
+        loss = torch.nn.MSELoss()
+        opt = torch.optim.SGD(trans.parameters(), lr=0.05)
+        errs = []
+        trans_mxs = []
+
+        print('Transfer function calibration begins..')
+        for it in range(niter):
+            print(f'{it}.', '-' * 10)
+
+            # record actual motion
+            actual_motion = []
+            wheel_vs = []
+
+            for dir_i, dir_ in enumerate(dirs_to_try):
+                drive_v = self.simple_dirs[dir_]
+                wheel_dir, wheel_dc, wheel_v, wheel_v_normed = self.calc_wheel_v(drive_v)
+                self.drive(wheel_dir, wheel_dc, t=drive_t, blocking=False)
+                wheel_vs.append(wheel_v)
+
+                try:
+                    while self.driving:
+                        flo.loop()
+                        self.loop()
+                        time.sleep(0.1)
+                    flo.loop()
+
+                    motion = flo.get_rel_motion()
+                    motion = motion / np.abs(motion).sum()
+                    motion = [motion[0], 0, motion[1]]  # f/b and w, TODO no strafe yet
+                    actual_motion.append(motion)
+
+                except KeyboardInterrupt:
+                    self.stop()
+                    return
+
+            # evaluate model for expected motion
+            actual_motion = torch.reshape(torch.tensor(actual_motion), (len(dirs_to_try), 3, 1))
+            wheel_vs = torch.reshape(torch.tensor(np.array(wheel_vs)), (len(dirs_to_try), 3, 1))
+            expected_motion = trans(wheel_vs)
+            err = loss(expected_motion, actual_motion)
+            print(f'loss: {err.item():.3f}')
+            errs.append(err.item())
+
+            opt.zero_grad()
+            err.backward()
+            opt.step()
+
+            # update transfer mx
+            with torch.no_grad():
+                updated_trans_mx = torch.inverse(trans.inv_tm_v.data.clone()).numpy()
+            trans_mxs.append(updated_trans_mx)
+            print('delta transfer:\n', updated_trans_mx - self.trans_mx)
+            self.trans_mx = updated_trans_mx
+
+        # choose the best transfer mx
+        self.trans_mx = trans_mxs[np.argmin(errs)]
+        print(f'Lowest error: {min(errs):.3f}')
+        print('Corresponding transition mx:\n', self.trans_mx)
+
+        print('Testing now..')
+        for dir_ in dirs_to_try:
+            self.simple_drive(dir_, t=drive_t, blocking=True)
 
     def calibrate_full_turn(self):
         pass  # TODO
@@ -213,7 +285,7 @@ def wheel_tests(omni_drive: OmniDrive):
     print('straight test')
     drive_v = np.array([1., 0., 0.])  # v, vn, w
 
-    wheel_dir, wheel_dc = omni_drive.calc_wheel_v(drive_v)
+    wheel_dir, wheel_dc, _, _ = omni_drive.calc_wheel_v(drive_v)
     print(wheel_dir, wheel_dc)
     omni_drive.drive(wheel_dir, wheel_dc, 5, blocking=True)
     time.sleep(2)
@@ -222,7 +294,7 @@ def wheel_tests(omni_drive: OmniDrive):
     print('left strafe test')
     drive_v = np.array([0., -1., 0.])  # v, vn, w
 
-    wheel_dir, wheel_dc = omni_drive.calc_wheel_v(drive_v)
+    wheel_dir, wheel_dc, _, _ = omni_drive.calc_wheel_v(drive_v)
     print(wheel_dir, wheel_dc)
     omni_drive.drive(wheel_dir, wheel_dc, 5, blocking=True)
     time.sleep(2)
@@ -231,7 +303,7 @@ def wheel_tests(omni_drive: OmniDrive):
     print('right strafe test')
     drive_v = np.array([0., 1., 0.])  # v, vn, w
 
-    wheel_dir, wheel_dc = omni_drive.calc_wheel_v(drive_v)
+    wheel_dir, wheel_dc, _, _ = omni_drive.calc_wheel_v(drive_v)
     print(wheel_dir, wheel_dc)
     omni_drive.drive(wheel_dir, wheel_dc, 5, blocking=True)
     time.sleep(2)
@@ -240,7 +312,7 @@ def wheel_tests(omni_drive: OmniDrive):
     print('counter-clockwise = left turn test')
     drive_v = np.array([0., 0., -1.])  # v, vn, w
 
-    wheel_dir, wheel_dc = omni_drive.calc_wheel_v(drive_v)
+    wheel_dir, wheel_dc, _, _ = omni_drive.calc_wheel_v(drive_v)
     print(wheel_dir, wheel_dc)
     omni_drive.drive(wheel_dir, wheel_dc, 5, blocking=True)
     time.sleep(2)
@@ -249,7 +321,7 @@ def wheel_tests(omni_drive: OmniDrive):
     print('clockwise = right turn test')
     drive_v = np.array([0., 0., 1.])  # v, vn, w
 
-    wheel_dir, wheel_dc = omni_drive.calc_wheel_v(drive_v)
+    wheel_dir, wheel_dc, _, _ = omni_drive.calc_wheel_v(drive_v)
     print(wheel_dir, wheel_dc)
     omni_drive.drive(wheel_dir, wheel_dc, 5, blocking=True)
     time.sleep(2)
@@ -271,10 +343,12 @@ def _main():
 
     signal.signal(signal.SIGINT, exit_code)
 
-    omni_drive.calibrate_direction()
+    omni_drive.calibrate_transfer_fun2()
 
     # tests
     # wheel_tests(omni_drive)
+
+    omni_drive.cleanup()
 
 
 if __name__ == '__main__':
