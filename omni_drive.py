@@ -4,14 +4,13 @@ import signal
 import sched
 import numpy as np
 import RPi.GPIO as GPIO
-import torch
 
 from actuator import LinActuator
 from motion import MotionSensor
 
 
 class OmniDrive:
-    def __init__(self, roller_pins, lin_act_pins, up_trans_t=6, down_trans_t=5, pwm_freq=1000):
+    def __init__(self, roller_pins, lin_act_pins, up_trans_t=6, down_trans_t=5, pwm_freq=1000, trans_mx=None):
 
         self.roller_dirs = np.array(['left', 'right'])
         self.simple_dirs = {'forward': [1., 0., 0.], 'backward': [-1., 0., 0.],  # v, vn, w
@@ -19,14 +18,17 @@ class OmniDrive:
                             'left_turn': [0., 0., -1.], 'right_turn': [0., 0., 1.]}
         self.simple_dirs = {k: np.array(v) for k, v in self.simple_dirs.items()}
 
-        self.def_d = (10. + 6.75) / 100.  # m, wheel distance
-        self.d = self.def_d
         self.noise_floors = np.zeros(3)  # noise/second; 3 axes
-        self.trans_mx = np.array(
-            [[-np.sin(np.pi / 3), np.cos(np.pi / 3), self.d],
-             [0, -1, self.d],
-             [np.sin(np.pi / 3), np.cos(np.pi / 3), self.d]]
-        )
+
+        if trans_mx is None:  # use the default
+            d = (10. + 6.75) / 100.  # m, wheel distance
+            self.trans_mx = np.array(
+                [[-np.sin(np.pi / 3), np.cos(np.pi / 3), d],
+                 [0, -1, d],
+                 [np.sin(np.pi / 3), np.cos(np.pi / 3), d]]
+            )
+        else:  # trans_mx was possibly previously optimized by calibrate_transfer_fun()
+            self.trans_mx = np.array(trans_mx)
 
         self.roller_pins = roller_pins
 
@@ -136,77 +138,19 @@ class OmniDrive:
         GPIO.cleanup()
         print('OmniDrive cleanup done')
 
-    # TODO need to calibrate whether the direction is right: forward vs backward, right vs left
-    #   this one calibrates hyperparams of the trans_mx --> rename this and make a calibrate direction function
-    # TODO LATER: also calibrate pi/3, not just d... USE BAYESIAN OPT: use the BayesianOptimization package
-    def calibrate_transfer_fun(self):  # TODO test this
-        flo = MotionSensor(0, 'front')
+    def calibrate_direction(self):
+        pass
+        # TODO LATER: need to calibrate whether the direction is right, i.e. sensor is not flipped:
+        #    forward vs backward, right vs left
 
-        rng = self.def_d * .5
-        drive_t = 5
-        ds = np.linspace(self.def_d - rng, self.def_d + rng, 10)
-        dirs_to_try = ['forward', 'backward', 'left_turn', 'right_turn']  # TODO try strafe l/r w/ other motion sensor
-
-        front_motion_dir_dominance = [np.abs(self.simple_dirs[dir_][[0, 2]]) for dir_ in dirs_to_try]
-        dir_motion_matches = [[] for _ in dirs_to_try]  # inner list ordered as ds
-        axis_noise_floors = [[] for _ in range(2)]  # inner list ordered as motion sensed axes
-        
-        print('Number of diameters to try:', len(ds))
-        
-        for di, d in enumerate(ds):
-            self.d = d
-            print(f'{di}: d = {d:.3f}')
-
-            for dir_i, (dir_, dom) in enumerate(zip(dirs_to_try, front_motion_dir_dominance)):
-                wheel_v = self.simple_drive(dir_, t=drive_t, blocking=False)
-
-                try:
-                    while self.driving:
-                        flo.loop()
-                        self.loop()
-                        time.sleep(0.1)
-                    flo.loop()
-
-                    # motion abs: assumes that the camera is rotated right: no diff here made of forward vs backward
-                    motion = np.abs(flo.get_rel_motion())
-                    motion_match = ((motion * (dom/dom.sum())) / motion.sum()).sum()
-                    dir_motion_matches[dir_i].append(motion_match.tolist())
-
-                    noise_floor = motion[dom == 0].sum()
-                    for axis_i in np.where(dom == 0)[0]:
-                        axis_noise_floors[axis_i].append(noise_floor)
-
-                except KeyboardInterrupt:
-                    self.stop()
-
-        mean_motion_matches = np.array(dir_motion_matches).mean(axis=0)  # mean across directions
-
-        # TODO rm, only for local matplotlib visualization and testing
-        print('Diameters:', ds.tolist())
-        print('Mean motion matches:', mean_motion_matches.tolist())
-        print('Directions:', dirs_to_try)
-        print('All motion matches:', dir_motion_matches)
-
-        # select diameter with the best performance
-        self.d = ds[np.argmax(mean_motion_matches)]
-        print(f'Direction calibration done; best diameter selected: {self.d:.03f}; default was {self.def_d:.03f}')
-
-        # set lvl of ignorance to avoid noise; only look at noise at the selected best diameter for each axis
-        mean_noise_floors = np.array(axis_noise_floors).mean(axis=1)  # per axis
-        self.noise_floors[[0, 2]] = mean_noise_floors / drive_t  # TODO compute it also for strafe axis with other sensor
-        print('Noise floor:', self.noise_floors.tolist())
-
-        # TODO actually do something with noise floors
-
-    def calibrate_transfer_fun2(self):
+    def calibrate_transfer_fun(self):
+        import torch
         import omni_transfer
 
         flo = MotionSensor(0, 'front')
         drive_t = 5
         niter = 50
         dirs_to_try = ['forward', 'backward', 'left_turn', 'right_turn']  # TODO try strafe l/r w/ other motion sensor
-        desired_motion = [self.simple_dirs[dir_] for dir_ in dirs_to_try]  # not abs
-        # desired_motion = torch.reshape(torch.tensor(desired_motion), (len(dirs_to_try), 3, 1))
 
         # setup nn
         trans = omni_transfer.OmniTransfer(self.def_d)
@@ -274,7 +218,7 @@ class OmniDrive:
             self.simple_drive(dir_, t=drive_t, blocking=True)
 
     def calibrate_full_turn(self):
-        pass  # TODO
+        pass  # TODO probs needs manual intervention by taking inputs from python (through ssh) (no fucking button)
 
     def calibrate_acc(self):
         pass  # TODO
@@ -334,7 +278,12 @@ def _main():
     roller2_pins = {'right': 25, 'left': 26, 'pwm': 12}
     roller_pins = [roller0_pins, roller1_pins, roller2_pins]
 
-    omni_drive = OmniDrive(roller_pins, lin_act_pins, up_trans_t=6, down_trans_t=6, pwm_freq=1000)
+    opt_trans_mx = None
+    # opt_trans_mx = [[ 1.16646569,  0.5,         0.1634709 ],
+    #                 [-0.00351549, -1.,          0.16910739],
+    #                 [-1.17349667,  0.5,         0.17474389]]
+    omni_drive = OmniDrive(roller_pins, lin_act_pins, up_trans_t=6, down_trans_t=6, pwm_freq=1000,
+                           trans_mx=opt_trans_mx)
     omni_drive.setup()
 
     def exit_code(*args):
@@ -343,11 +292,11 @@ def _main():
 
     signal.signal(signal.SIGINT, exit_code)
 
-    omni_drive.calibrate_transfer_fun2()
+    # omni_drive.calibrate_transfer_fun2()
 
     # tests
-    # wheel_tests(omni_drive)
-
+    wheel_tests(omni_drive)
+    
     omni_drive.cleanup()
 
 
