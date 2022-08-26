@@ -4,41 +4,50 @@ import signal
 import sched
 import numpy as np
 import RPi.GPIO as GPIO
+from scipy.optimize import curve_fit
+from typing import Callable, Any, Union
+import simple_pid
 
 from actuator import LinActuator
 from motion import MotionSensor
 
 
 class OmniDrive:
+
+    FB_FUN_TYPE =
+
     def __init__(self, roller_pins, lin_act_pins, up_trans_t=6, down_trans_t=5, pwm_freq=1000, trans_mx=None):
 
         self.roller_dirs = np.array(['left', 'right'])
-        self.simple_dirs = {'forward': [1., 0., 0.], 'backward': [-1., 0., 0.],  # v, vn, w
-                            'left_strafe': [0., -1., 0.], 'right_strafe': [0., 1., 0.],
-                            'left_turn': [0., 0., -1.], 'right_turn': [0., 0., 1.]}
-        self.simple_dirs = {k: np.array(v) for k, v in self.simple_dirs.items()}
+        self.simple_dirs_v = {'forward': [1., 0., 0.], 'backward': [-1., 0., 0.],  # v, vn, w
+                              'left_strafe': [0., -1., 0.], 'right_strafe': [0., 1., 0.],
+                              'left_turn': [0., 0., -1.], 'right_turn': [0., 0., 1.]}
+        self.simple_dirs_v = {k: np.array(v) for k, v in self.simple_dirs_v.items()}
 
         self.noise_floors = np.zeros(3)  # noise/second; 3 axes
+        self.pwm_to_motion = [lambda x: x] * 3  # for each axis a function fit that takes pwm of the wheels and -> v
 
+        self.def_d = (10. + 6.75) / 100.  # m, wheel distance
         if trans_mx is None:  # use the default
-            d = (10. + 6.75) / 100.  # m, wheel distance
             self.trans_mx = np.array(
-                [[-np.sin(np.pi / 3), np.cos(np.pi / 3), d],
-                 [0, -1, d],
-                 [np.sin(np.pi / 3), np.cos(np.pi / 3), d]]
+                [[-np.sin(np.pi / 3), np.cos(np.pi / 3), self.def_d],
+                 [0, -1, self.def_d],
+                 [np.sin(np.pi / 3), np.cos(np.pi / 3), self.def_d]]
             )
         else:  # trans_mx was possibly previously optimized by calibrate_transfer_fun()
             self.trans_mx = np.array(trans_mx)
 
         self.roller_pins = roller_pins
+        self.pwm_freq = pwm_freq
+        self.pwms = None
 
         self.up_trans_t = up_trans_t
         self.down_trans_t = down_trans_t
-        self.pwm_freq = pwm_freq
 
-        self.pwms = None
-        self.scheduler = sched.scheduler(time.time, time.sleep)
         self.driving = False
+        self.rolling = False
+        self.roll_fun: Callable[[], Any] = lambda: None
+        self.scheduler = sched.scheduler(time.time, time.sleep)
 
         self.lin_act = LinActuator(lin_act_pins)
 
@@ -85,6 +94,12 @@ class OmniDrive:
         return wheel_dir, wheel_dc, wheel_v, wheel_v_normed
 
     def drive(self, wheel_dir, wheel_dc, t=None, blocking=False, callback=None):
+
+        if self.driving or self.rolling:
+            print(f'OmniDrive already running (driving={self.driving}, rolling={self.rolling})! '
+                  f'Call stop first!', file=sys.stderr)
+            return False
+
         # set duty cycle
         for i, pins in enumerate(self.roller_pins):
             GPIO.output(pins['left'], GPIO.LOW)
@@ -99,26 +114,64 @@ class OmniDrive:
 
         # stop
         if t is not None and blocking:
-            time.sleep(t)
-            self.stop()
+            try:
+                time.sleep(t)
+            except KeyboardInterrupt:
+                pass
+            finally:
+                self.stop()
         elif t is not None and not blocking:
             self.scheduler.enter(t, 1, self.stop)
 
         if t is not None and callback is not None:
             self.scheduler.enter(t, 2, callback)
 
+        return True
+
     def simple_drive(self, simple_dir: str, t=None, blocking=False, callback=None):
-        if simple_dir not in self.simple_dirs:
-            print(f'Direction {simple_dir} is not any of: {", ".join(self.simple_dirs)}!', file=sys.stderr)
+        if simple_dir not in self.simple_dirs_v:
+            print(f'Direction {simple_dir} is not any of: {", ".join(self.simple_dirs_v)}!', file=sys.stderr)
             return
         print(f'Drive {simple_dir} for {t} seconds')
 
-        drive_v = self.simple_dirs[simple_dir]
+        drive_v = self.simple_dirs_v[simple_dir]
         wheel_dir, wheel_dc, _, _ = self.calc_wheel_v(drive_v)
-        self.drive(wheel_dir, wheel_dc, t, blocking, callback)
+        return self.drive(wheel_dir, wheel_dc, t, blocking, callback)
+
+    def roll(self, feedback: Callable[[], np.ndarray], blocking=False, eps: float = None, callback: Callable[[], Any] = None):
+        # performs movement on all three axis according to feedback using 1 pid controller per axis
+        # if no blocking, main functionality is run in loop(), only the function to run in there is defined here + setup
+        # overall dynamics:
+        #   drive_v -> motion_v -> in-game_v -> change position in-game -> feedback of delta position -> pid -> drive_v
+        # usage:
+        #   get from point A to B in map - turn x degrees from current, or go in x, y direction or all of these at once
+        #   if eps close stops or can be stopped at any time (when e.g. been rolling too long); use self.rolling
+        #   do chain calls with callbacks on top of callbacks (callback as last function argument always)
+        #   slippage possible during drive: feedback should return 3 error values, 1 for each axis;
+        #     even if it only needs to turn, it could slip off the original position which is then be corrected for here
+
+        if self.driving or self.rolling:
+            print(f'OmniDrive already running (driving={self.driving}, rolling={self.rolling})! '
+                  f'Call stop first!', file=sys.stderr)
+            return False
+
+        # todo set up pids
+        pids = [simple_pid.PID() for axis in range(3)] # TODO how to have the game speed scaling present here? -> calibration
+
+        # TODO set up function to run in loop
+
+        # todo use:
+        #   pid.output_limits
+        #   pid.tunings = (1.0, 0.2, 0.4) according to calibration
+        #   pid.sample_time = 0.01
+        #   pid.error_map = pi_clip
+        pass  # TODO use degree to motion calibrated values?
+
+        self.rolling = True
+        return True
 
     def trapesoid_accelerate(self):  # TODO solve it in the loop()
-        pass  # TODO
+        pass  # TODO is this necessary? only if you want to go up to high speeds, otherwise rats can follow immediately
 
     def stop(self):
         for i, pins in enumerate(self.roller_pins):
@@ -127,21 +180,20 @@ class OmniDrive:
             self.pwms[i].stop()
 
         self.driving = False
+        self.rolling = False
 
     def loop(self):
         self.scheduler.run(blocking=False)
         self.lin_act.loop()
+
+        if self.rolling:
+            self.roll_fun()
 
     def cleanup(self):
         self.stop()
         self.lin_act.cleanup()
         GPIO.cleanup()
         print('OmniDrive cleanup done')
-
-    def calibrate_direction(self):
-        pass
-        # TODO LATER: need to calibrate whether the direction is right, i.e. sensor is not flipped:
-        #    forward vs backward, right vs left
 
     def calibrate_transfer_fun(self):
         import torch
@@ -153,7 +205,7 @@ class OmniDrive:
         dirs_to_try = ['forward', 'backward', 'left_turn', 'right_turn']  # TODO try strafe l/r w/ other motion sensor
 
         # setup nn
-        trans = omni_transfer.OmniTransfer(self.def_d)
+        trans = omni_transfer.OmniTransfer()
         loss = torch.nn.MSELoss()
         opt = torch.optim.SGD(trans.parameters(), lr=0.05)
         errs = []
@@ -168,26 +220,17 @@ class OmniDrive:
             wheel_vs = []
 
             for dir_i, dir_ in enumerate(dirs_to_try):
-                drive_v = self.simple_dirs[dir_]
+                drive_v = self.simple_dirs_v[dir_]
                 wheel_dir, wheel_dc, wheel_v, wheel_v_normed = self.calc_wheel_v(drive_v)
-                self.drive(wheel_dir, wheel_dc, t=drive_t, blocking=False)
                 wheel_vs.append(wheel_v)
 
-                try:
-                    while self.driving:
-                        flo.loop()
-                        self.loop()
-                        time.sleep(0.1)
-                    flo.loop()
+                flo.get_rel_motion()  # zero out rel vars
+                self.drive(wheel_dir, wheel_dc, t=drive_t, blocking=True)
 
-                    motion = flo.get_rel_motion()
-                    motion = motion / np.abs(motion).sum()
-                    motion = [motion[0], 0, motion[1]]  # f/b and w, TODO no strafe yet
-                    actual_motion.append(motion)
-
-                except KeyboardInterrupt:
-                    self.stop()
-                    return
+                motion = flo.get_rel_motion()
+                motion = motion / np.abs(motion).sum()
+                motion = [motion[0], 0, motion[1]]  # f/b and w, TODO no strafe yet
+                actual_motion.append(motion)
 
             # evaluate model for expected motion
             actual_motion = torch.reshape(torch.tensor(actual_motion), (len(dirs_to_try), 3, 1))
@@ -217,11 +260,75 @@ class OmniDrive:
         for dir_ in dirs_to_try:
             self.simple_drive(dir_, t=drive_t, blocking=True)
 
-    def calibrate_full_turn(self):
-        pass  # TODO probs needs manual intervention by taking inputs from python (through ssh) (no fucking button)
+    def calibrate_speed(self):
+        # try different speeds, compare with motion sensor recording,
+        # establish drive velocity (motor pwm) to motion velocity function for each axis
+        drive_t = 5  # s
+        pwms_to_try = np.linspace(0.1, 1.0, 10)
+        dirs_to_try = ['forward', 'backward', 'left_turn', 'right_turn']  # TODO strafe
+        flo = MotionSensor(0, 'front')
 
-    def calibrate_acc(self):
-        pass  # TODO
+        drive_vs = []
+        motions = []
+
+        for dir_i, dir_ in enumerate(dirs_to_try):
+            print('Direction:', dir_)
+            for pwm in pwms_to_try:
+                print(f'pwm: {pwm}')
+
+                drive_v = self.simple_dirs_v[dir_] * pwm
+                wheel_dir, wheel_dc, _, _ = self.calc_wheel_v(drive_v)
+                drive_vs.append(drive_v)
+
+                flo.get_rel_motion()  # zero out rel vars
+                self.drive(wheel_dir, wheel_dc, t=drive_t, blocking=True)
+                motion = flo.get_rel_motion()
+                motion = [motion[0], 0, motion[1]]  # TODO add strafe
+                motions.append(motion)
+
+        # establish pwm to motion velocity function for each axis
+        #   do scipy function fitting for each axis
+        drive_vs = np.abs(np.array(drive_vs))  # abs: direction agnostic within axis
+        motions = np.abs(np.array(motions))  # same
+        axes = np.argmax(np.abs(drive_vs), axis=1)
+
+        for axis in [0, 2]:  # TODO add strafe and [0, 1, 2]
+            dv = drive_vs[axes == axis, axis]  # pwms (see scaling above)
+            mv = motions[axes == axis, axis] / drive_t  # motion/sec
+
+            f = lambda x, *p: p[0] * x + p[1]  # TODO test if higher order function is needed
+            p0 = np.ones(2)
+
+            popt, pcov = curve_fit(f, dv, mv, p0)
+            fopt = lambda x: f(x, *popt)
+            self.pwm_to_motion[axis] = fopt
+
+            print(f'axis {axis}) popt: {popt.tolist()}')
+
+    def calibrate_full_rot(self):
+        pass  # TODO probs needs manual intervention by taking inputs from python (through ssh) (no fucking button)
+        # TODO do for all axes separately; the turn axis is the most important: degree to motion conversion
+        # TODO omni drive function (see above) that turns a certain degree with pid and the info taken here
+
+    def calibrate_roll_motion(self):
+        # TODO
+        # Doom player has its sliding acceleration and deceleration (sliding ice-cube) with forces_applied - friction
+        #   and forces_applied is defined by the recorded ball motion
+        # acceleration and deceleration needs to be incorporated in rolling:
+        #   in 1) calculate acceleration, deceleration (same as accel?) and the stable velocity from drive_v
+        #   in 2) empirically adjust PID params to avoid overshoot
+        # put the player in an arena then call this function
+        # 1) drive - game velocity translation
+        #    omni driver runs drive() in straight directions xor turns and tracks in-game position (and vel., accel.)
+        #    calc drive velocity to game velocity function
+        #    derive acceleration, deceleration and stable in-game velocity from drive velocity (if dependent on it)
+        # 2) optimize PID params
+        #    the omni driver sets goals for itself (in game delta coordinates = fb error)
+        #    omni driver runs roll() (either straight x,y motion or turns) to get to the goal,
+        #      while tracking in-game motion
+        #    optimizes Kp, Ki and Kd for each axis; init them according to translation (vel., accel.) calculated in 1);
+        #    change Kp, Ki, Kd up/down until reaching the fast conversion without overshooting
+        pass
 
 
 def wheel_tests(omni_drive: OmniDrive):
@@ -296,7 +403,7 @@ def _main():
 
     # tests
     wheel_tests(omni_drive)
-    
+
     omni_drive.cleanup()
 
 

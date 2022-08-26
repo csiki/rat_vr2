@@ -1,10 +1,12 @@
 numpy
 pandas
 matplotlib
+scipy
 
 sklearn
-bayesian-optimization
+# bayesian-optimization
 torch
+simple-pid
 
 RPi.GPIO
 pmw3901
