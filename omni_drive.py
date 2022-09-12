@@ -2,7 +2,7 @@ import sys
 import time
 import signal
 import sched
-import json
+import pickle
 import numpy as np
 import RPi.GPIO as GPIO
 from scipy.optimize import curve_fit
@@ -14,15 +14,14 @@ from actuator import LinActuator
 from motion import MotionSensor
 
 
-# TODO need to be able to load previously derived calibration values: have (json) load and save functions
-
 class OmniDrive:
 
     # FB_FUN_TYPE =
     PIDp = namedtuple('PIDp', ['Kp', 'Ki', 'Kd'])
     AXES = 3
+    PWM_2_MOTION_FUN = lambda x, *p: x * p[0] + p[1]  # uses pwm_to_motion_p params for each axis
 
-    def __init__(self, roller_pins, lin_act_pins, up_trans_t=6, down_trans_t=5, pwm_freq=1000, calib_path=None):
+    def __init__(self, roller_pins, lin_act_pins, up_trans_t=6, down_trans_t=5, pwm_freq=1000, calib_path='omni_calib.pckl'):
 
         self.roller_dirs = np.array(['left', 'right'])
         self.simple_dirs_v = {'forward': [1., 0., 0.], 'backward': [-1., 0., 0.],  # v, vn, w
@@ -31,7 +30,7 @@ class OmniDrive:
         self.simple_dirs_v = {k: np.array(v) for k, v in self.simple_dirs_v.items()}
 
         self.noise_floors = np.zeros(OmniDrive.AXES)  # noise/second; 3 axes
-        self.pwm_to_motion = [lambda x: x] * OmniDrive.AXES  # for each axis a function fit that pwm -> v
+        self.pwm_to_motion_p = np.stack([np.ones(3), np.zeros(3)], axis=1)  # lin fun of scaler and bias for each axis
 
         # pid stuff
         self.pid_p = [OmniDrive.PIDp(0., 0., 0.) for _ in range(OmniDrive.AXES)]  # PID parameters
@@ -62,7 +61,14 @@ class OmniDrive:
 
         # update already calibrated vars
         if calib_path:
-            pass  # TODO update: noise_floors, pwm_to_motion, pid_p, pid_t, pid_err_scalers, trans_mx
+            with open(calib_path, 'rb') as f:
+                calib = pickle.load(f)
+            self.noise_floors = calib['noise_floors']
+            self.pwm_to_motion_p = calib['pwm_to_motion_p']
+            self.pid_p = calib['pid_p']
+            self.pid_t = calib['pid_t']
+            self.pid_err_scalers = calib['pid_err_scalers']
+            self.trans_mx = calib['trans_mx']
 
         GPIO.setmode(GPIO.BCM)
 
@@ -82,8 +88,12 @@ class OmniDrive:
         print('OmniDrive setup done')
 
     def save(self, calib_path):
-        # TODO save as json: noise_floors, pwm_to_motion, pid_p, pid_t, pid_err_scalers, trans_mx
-        pass
+        calib = {'noise_floors': self.noise_floors, 'pwm_to_motion_p': self.pwm_to_motion_p,
+                 'pid_p': self.pid_p, 'pid_t': self.pid_t, 'pid_err_scalers': self.pid_err_scalers,
+                 'trans_mx': self.trans_mx}
+
+        with open(calib_path, 'wb') as f:
+            pickle.dump(calib, f)
 
     def mount(self, blocking=False, callback=None):
         self.lin_act.drive('down', self.down_trans_t, blocking=blocking)
@@ -356,8 +366,7 @@ class OmniDrive:
             p0 = np.ones(2)
 
             popt, pcov = curve_fit(f, dv, mv, p0)
-            fopt = lambda x: f(x, *popt)
-            self.pwm_to_motion[axis] = fopt
+            self.pwm_to_motion_p[axis, :] = popt
 
             print(f'axis {axis}) popt: {popt.tolist()}')
 
