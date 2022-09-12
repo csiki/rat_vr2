@@ -2,14 +2,13 @@ import numpy as np
 import torch
 
 
-class OmniTransfer(torch.nn.Module):
+class OmniTransferOpt(torch.nn.Module):
     def __init__(self, def_d):
         super().__init__()
-        d = (10. + 6.75) / 100.
         self.tm = torch.tensor(
-            [[-np.sin(np.pi / 3), np.cos(np.pi / 3), d],
-             [0, -1, d],
-             [np.sin(np.pi / 3), np.cos(np.pi / 3), d]]
+            [[-np.sin(np.pi / 3), np.cos(np.pi / 3), def_d],
+             [0, -1, def_d],
+             [np.sin(np.pi / 3), np.cos(np.pi / 3), def_d]]
         )
         self.inv_tm_v = torch.nn.Parameter(torch.inverse(self.tm))
 

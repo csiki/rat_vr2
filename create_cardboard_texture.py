@@ -1,11 +1,14 @@
 import os, sys
 import numpy as np
 import matplotlib.pyplot as plt
-from skimage.transform import resize
+from skimage.transform import resize, rescale
 
 
-ppi = 100
+ppi = 55
+word_ppi = 100
 ppc = ppi / 2.54
+word_ppc = word_ppi / 2.54
+
 base_path = 'c:\\wut\\ratsplaydoom\\cardboard\\doom-ii-map01-entryway-3dmodel\\textures'
 to_path = 'c:\\wut\\ratsplaydoom\\cardboard\\cardboard_textures'
 
@@ -27,14 +30,20 @@ reps = (int(np.ceil(to_size_pix[0] / src_img.shape[0])), int(np.ceil(to_size_pix
 new_img = np.tile(src_img, reps)
 new_img = new_img[:to_size_pix[0], :to_size_pix[1]]
 
-print(f'resized img pix: {new_img.shape} cm: {new_img.shape[0] / ppc:.2f} x {new_img.shape[1] / ppc:.2f}')
+# resize to word ppi
+resize_by = word_ppi / ppi
+new_img = rescale(new_img, (resize_by, resize_by, 1))
 
-new_img_size_cm = (new_img.shape[0] / ppc, new_img.shape[1] / ppc)
+print(f'resized img pix: {new_img.shape} cm: {new_img.shape[0] / word_ppc:.2f} x {new_img.shape[1] / word_ppc:.2f}')
+
+new_img_size_cm = (new_img.shape[0] / word_ppc, new_img.shape[1] / word_ppc)
 print(f'final img pix: {new_img.shape} cm: {new_img_size_cm[0]:.2f} x {new_img_size_cm[1]:.2f}')
 
 new_img_name = f'{src_img_name[:src_img_name.find(".")]}_{new_img_size_cm[0]:.1f}-{new_img_size_cm[1]:.1f}.png'
 new_img_path = os.path.join(to_path, new_img_name)
 plt.imsave(new_img_path, new_img)
 
-print('final img saved to:', new_img_path)
+if abs(new_img_size_cm[0] - to_size_cm[0]) > 0.5 or abs(new_img_size_cm[1] - to_size_cm[1]) > 0.5:
+    print('GENERATED IMG IS OFF!', file=sys.stderr)
 
+print('final img saved to:', new_img_path)
