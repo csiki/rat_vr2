@@ -3,22 +3,25 @@ import time
 import signal
 import sched
 import pickle
+
+import matplotlib.pyplot as plt
 import numpy as np
 import RPi.GPIO as GPIO
 from scipy.optimize import curve_fit
-from typing import Callable, Any, Union
+from typing import Callable, Any, Union, Tuple
 import simple_pid
 from collections import namedtuple
 
 from actuator import LinActuator
 from motion import MotionSensor
+from player_movement import PlayerMovement, Feedback
 
 
 class OmniDrive:
 
     # FB_FUN_TYPE =
     PIDp = namedtuple('PIDp', ['Kp', 'Ki', 'Kd'])
-    AXES = 3
+    AXES = 3  # forward/backward, left/right strafe, left/right turn
     PWM_2_MOTION_FUN = lambda x, *p: x * p[0] + p[1]  # uses pwm_to_motion_p params for each axis
 
     def __init__(self, roller_pins, lin_act_pins, up_trans_t=6, down_trans_t=5, pwm_freq=1000, calib_path='omni_calib.pckl'):
@@ -34,7 +37,7 @@ class OmniDrive:
 
         # pid stuff
         self.pid_p = [OmniDrive.PIDp(0., 0., 0.) for _ in range(OmniDrive.AXES)]  # PID parameters
-        self.pid_t = 0.05  # sec; time constant, time between PID updates
+        self.pid_dt = 0.05  # sec; time constant, time between PID updates
         self.pid_err_scalers = np.ones(OmniDrive.AXES)  # scales err according to pwm to delta game pos
 
         # transfer mx
@@ -66,7 +69,7 @@ class OmniDrive:
             self.noise_floors = calib['noise_floors']
             self.pwm_to_motion_p = calib['pwm_to_motion_p']
             self.pid_p = calib['pid_p']
-            self.pid_t = calib['pid_t']
+            self.pid_dt = calib['pid_dt']
             self.pid_err_scalers = calib['pid_err_scalers']
             self.trans_mx = calib['trans_mx']
 
@@ -89,7 +92,7 @@ class OmniDrive:
 
     def save(self, calib_path):
         calib = {'noise_floors': self.noise_floors, 'pwm_to_motion_p': self.pwm_to_motion_p,
-                 'pid_p': self.pid_p, 'pid_t': self.pid_t, 'pid_err_scalers': self.pid_err_scalers,
+                 'pid_p': self.pid_p, 'pid_dt': self.pid_dt, 'pid_err_scalers': self.pid_err_scalers,
                  'trans_mx': self.trans_mx}
 
         with open(calib_path, 'wb') as f:
@@ -157,17 +160,17 @@ class OmniDrive:
 
         return True
 
-    def simple_drive(self, simple_dir: str, t=None, blocking=False, callback=None):
+    def simple_drive(self, simple_dir: str, speed: float = 1., t=None, blocking=False, callback=None):
         if simple_dir not in self.simple_dirs_v:
             print(f'Direction {simple_dir} is not any of: {", ".join(self.simple_dirs_v)}!', file=sys.stderr)
             return
         print(f'Drive {simple_dir} for {t} seconds')
 
-        drive_v = self.simple_dirs_v[simple_dir]
+        drive_v = self.simple_dirs_v[simple_dir] * speed
         wheel_dir, wheel_dc = self.calc_wheel_v(drive_v)
         return self.drive(wheel_dir, wheel_dc, t, blocking, callback)
 
-    def roll(self, feedback: Callable[[], np.ndarray], eps: float, blocking=False, callback: Callable[[], Any] = None):
+    def roll(self, feedback: Feedback, eps: float, blocking=False, callback: Callable[[], Any] = None):
         # performs movement on all three axis according to feedback using 1 pid controller per axis
         # if no blocking, main functionality is run in loop(), only the function to run in there is defined here + setup
         # overall dynamics:
@@ -179,15 +182,8 @@ class OmniDrive:
         #   slippage possible during drive: feedback should return 3 error values, 1 for each axis;
         #     even if it only needs to turn, it could slip off the original position which is then corrected for
 
-        # no need to provide the setpoint, set it to 0, and return -err from feedback()
-
-        # PID tuning: https://www.youtube.com/watch?v=sFOEsA0Irjs, https://www.youtube.com/watch?v=IB1Ir4oCP5k
-        #   https://medium.com/@svm161265/when-and-why-to-use-p-pi-pd-and-pid-controller-73729a708bb5
-        # calibration process:
-        #   increase Kp to reduce rise time; keep increasing it until overshoot happens
-        #   increase Ki to reduce rise time too; helps in noisy environments -> set it to a low value
-        #   increase Kd to decrease overshoot; can't be used when noise is present -> set it to a low value, maybe == Ki
-        # x0=0, x^=10, v(pwm=1)=5 1/s, v(pwn=0.5)=2 1/s;
+        # feedback returns the error
+        # no need to provide the setpoint, set it to 0, and take err from feedback() and negate it
 
         if self.driving or self.rolling:
             print(f'OmniDrive already running (driving={self.driving}, rolling={self.rolling})! '
@@ -196,12 +192,12 @@ class OmniDrive:
 
         # set up PIDs
         # no need for proportional_on_measurement
-        pids = [simple_pid.PID(*self.pid_p[axis], sample_time=self.pid_t, output_limits=(-1., 1.), setpoint=0.,
+        pids = [simple_pid.PID(*self.pid_p[axis], sample_time=self.pid_dt, output_limits=(-1., 1.), setpoint=0.,
                                error_map=lambda x: x * self.pid_err_scalers[axis])
                 for axis in range(OmniDrive.AXES)]
 
         if blocking:
-            neg_err = feedback()
+            neg_err = -feedback()
 
             while np.abs(np.max(neg_err)) < eps or not self.rolling:
                 drive_v = np.array([pid(neg_err[axes]) for axes, pid in enumerate(pids)])
@@ -217,7 +213,7 @@ class OmniDrive:
         # not blocking
         # set up function to run in loop that returns drive_v
         def _roll_fun():
-            neg_err = feedback()  # the negative error, which enables the constant 0 setpoint
+            neg_err = -feedback()  # the negative error, which enables the constant 0 setpoint
 
             # when done
             if np.abs(np.max(neg_err)) < eps or not self.rolling:
@@ -326,7 +322,7 @@ class OmniDrive:
         for dir_ in dirs_to_try:
             self.simple_drive(dir_, t=drive_t, blocking=True)
 
-    def calibrate_speed(self):
+    def calibrate_speed(self):  # calling this is not necessary, only sets pwm_to_motion_p
         # try different speeds, compare with motion sensor recording,
         # establish drive velocity (motor pwm) to motion velocity function for each axis
         drive_t = 5  # s
@@ -361,22 +357,23 @@ class OmniDrive:
         for axis in [0, 2]:  # TODO add strafe and [0, 1, 2]
             dv = drive_vs[axes == axis, axis]  # pwms (see scaling above)
             mv = motions[axes == axis, axis] / drive_t  # motion/sec
-
-            f = lambda x, *p: p[0] * x + p[1]  # TODO test if higher order function is needed
             p0 = np.ones(2)
 
-            popt, pcov = curve_fit(f, dv, mv, p0)
+            popt, pcov = curve_fit(OmniDrive.PWM_2_MOTION_FUN, dv, mv, p0)
             self.pwm_to_motion_p[axis, :] = popt
 
             print(f'axis {axis}) popt: {popt.tolist()}')
 
     def calibrate_full_rot(self):
+        # defines motion (rad) to angle transfer function
         pass  # TODO probs needs manual intervention by taking inputs from python (through ssh) (no fucking button)
         # TODO do for all axes separately; the turn axis is the most important: degree to motion conversion
         # TODO omni drive function (see above) that turns a certain degree with pid and the info taken here
 
-    def calibrate_roll_motion(self):
-        # TODO
+    def calibrate_roll_motion(self, feedback: Feedback, set_rel_goal: Callable[[np.ndarray], Any],  # TODO test run
+                              map_size: Tuple[float, float]):
+        # FOR NOW 1/B DECELERATION IS IGNORED FOR NOW AS SLIDING IN DOOM CAN BE MINIMIZED WITH THIS SCRIPT:
+        #   https://forum.zdoom.org/viewtopic.php?p=933227&sid=fdef5121aec04509a2b76c8048ea5cc5#p933227
         # Doom player has its sliding acceleration and deceleration (sliding ice-cube) with forces_applied - friction
         #   and forces_applied is defined by the recorded ball motion
         # acceleration and deceleration needs to be incorporated in rolling:
@@ -384,15 +381,94 @@ class OmniDrive:
         #   in 2) empirically adjust PID params to avoid overshoot
         # put the player in an arena then call this function
         # 1) drive - game velocity translation
-        #    omni driver runs drive() in straight directions xor turns and tracks in-game position (and vel., accel.)
-        #    calc drive velocity to game velocity function
-        #    derive acceleration, deceleration and stable in-game velocity from drive velocity (if dependent on it)
+        #    A) omni driver runs drive() in straight directions xor turns and tracks in-game position (and vel., accel.)
+        #       calc drive velocity to game velocity function
+        #    B) derive acceleration, deceleration and stable in-game velocity from drive velocity (if dependent on it)
         # 2) optimize PID params
         #    the omni driver sets goals for itself (in game delta coordinates = fb error)
         #    omni driver runs roll() (either straight x,y motion or turns) to get to the goal,
         #      while tracking in-game motion
         #    optimizes Kp, Ki and Kd for each axis; init them according to translation (vel., accel.) calculated in 1);
         #    change Kp, Ki, Kd up/down until reaching the fast conversion without overshooting
+
+        # feedback() returns the error from the set goal
+        # set_rel_goal() sets a relative goal
+
+        # 1/A and 1/B: derive drive_v to game_v transfer function (scaler), and acceleration
+        # go straight, go backwards, go straight, ... until enough runs
+        nruns = 12
+        rel_goal = np.array([map_size[0] / 2, 0., 0.])
+        drive_v_speed_rng = (0.1, 1.0)
+        drive_vs, vels, accs = [], [], []
+
+        for r in range(nruns):
+            drive_v_speed = np.random.uniform(*drive_v_speed_rng)
+            dvs_per_run, vels_per_run, accs_per_run = [], [], []
+
+            set_rel_goal(rel_goal)
+            fb = feedback()
+            self.simple_drive('forward' if rel_goal[0] > 0 else 'backward', drive_v_speed)
+
+            while (rel_goal[0] > 0 and fb[0] > 0) or (rel_goal[0] < 0 and fb[0] < 0):
+                dvs_per_run.append(drive_v_speed)
+                vels_per_run.append(feedback.vel().abs()[0])
+                accs_per_run.append(feedback.acc().abs()[0])
+                time.sleep(self.pid_dt)  # use same dt, as the pid controller sample time
+                fb = feedback()
+
+            self.stop()
+            drive_vs.append(np.array(dvs_per_run))
+            vels.append(np.array(vels_per_run))
+            accs.append(np.array(accs_per_run))
+
+            time.sleep(1)
+            rel_goal *= -1
+
+        # filter velocities to ignore acceleration times; select max acceleration as the correspondent value to drive_v
+        # assumed: movement starts w/ acceleration (deceleration is not recorded), then velocity is ~constant, acc ~= 0;
+        #          most of the movement is constant velocity
+        filt_dvs_v, filt_dvs_a, filt_vels, filt_accs = [], [], [], []  # separate drive_v for vel and acc
+        for r in range(nruns):
+            dv, vel, acc = drive_vs[r], vels[r], accs[r]
+
+            max_acc_i = np.argmax(acc)  # already abs
+            acc_i = np.arange(len(acc))
+            zero_crossings_after_max = acc_i[(acc_i > max_acc_i) & (acc <= 0)]
+            first_zero_crossing_after_max = zero_crossings_after_max[np.argmin(np.abs(zero_crossings_after_max - max_acc_i))]
+
+            filt_dvs_v.append(dv[first_zero_crossing_after_max:])
+            filt_vels.append(vel[first_zero_crossing_after_max:])
+            filt_dvs_a.append(dv[max_acc_i])  # let's hope the noise avgs out
+            filt_accs.append(acc[max_acc_i])
+
+        filt_dvs_v = np.concatenate(filt_dvs_v)
+        filt_vels = np.concatenate(filt_vels)
+        filt_dvs_a = np.array(filt_dvs_a)
+        filt_accs = np.array(filt_accs)
+
+        # fit
+        drive_2_game_vel = (filt_vels / filt_dvs_v).mean()
+        drive_2_game_acc = (filt_accs / filt_dvs_a).mean()
+
+        # show fit
+        plt.plot(filt_dvs_v, filt_vels, label='drive to vel')
+        plt.plot(filt_dvs_a, filt_accs, label='drive to acc')
+
+        x = np.linspace(filt_dvs_v.min(), filt_dvs_v.max(), 50)
+        plt.plot(x, x * drive_2_game_vel, '--', label='drive to vel fit')
+        plt.plot(x, x * drive_2_game_acc, '--', label='drive to acc fit')
+
+        plt.legend()
+        plt.show()
+
+        # TODO 2) tune PID parameters
+        # PID tuning: https://www.youtube.com/watch?v=sFOEsA0Irjs, https://www.youtube.com/watch?v=IB1Ir4oCP5k
+        #   https://medium.com/@svm161265/when-and-why-to-use-p-pi-pd-and-pid-controller-73729a708bb5
+        # calibration process:
+        #   increase Kp to reduce rise time; keep increasing it until overshoot happens
+        #   increase Ki to reduce rise time too; helps in noisy environments -> set it to a low value
+        #   increase Kd to decrease overshoot; can't be used when noise is present -> set it to a low value, maybe == Ki
+
         pass
 
 
@@ -444,6 +520,8 @@ def wheel_tests(omni_drive: OmniDrive):
 
 
 def _main():
+    calib_path = sys.argv[1] if len(sys.argv) > 1 else None
+
     lin_act_pins = {'up': 22, 'down': 4, 'enable': 27}
     roller0_pins = {'right': 23, 'left': 24, 'pwm': 18}
     roller1_pins = {'right': 5, 'left': 6, 'pwm': 13}
@@ -455,7 +533,7 @@ def _main():
     #                 [-0.00351549, -1.,          0.16910739],
     #                 [-1.17349667,  0.5,         0.17474389]]
     omni_drive = OmniDrive(roller_pins, lin_act_pins, up_trans_t=6, down_trans_t=6, pwm_freq=1000,
-                           trans_mx=opt_trans_mx)
+                           calib_path=calib_path)
     omni_drive.setup()
 
     def exit_code(*args):
