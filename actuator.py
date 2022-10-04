@@ -60,6 +60,6 @@ def man(dir_, t):
 
 if __name__ == '__main__':
     dir_ = sys.argv[1]
-    t = int(sys.argv[2]) if len(sys.argv) > 2 else 4
+    t = float(sys.argv[2]) if len(sys.argv) > 2 else 4
 
     man(dir_, t)

@@ -2,6 +2,8 @@ import time
 import argparse
 import numpy as np
 from pmw3901 import PMW3901, PAA5100, BG_CS_FRONT_BCM, BG_CS_BACK_BCM
+from typing import Callable, Any, Union, Tuple, List
+from collections import deque
 
 
 class MotionSensor:
@@ -14,8 +16,15 @@ class MotionSensor:
         self.last_rel_t, self.last_rec = time.time(), 0
         self.rel_x, self.rel_y = 0, 0
         self.abs_x, self.abs_y = 0, 0
+        self.reset_rel_next_iter = False
 
     def loop(self):
+        # reset relative motion if get_rel_motion() was called after the previous loop() run
+        if self.reset_rel_next_iter:
+            self.rel_x, self.rel_y = 0, 0
+            self.reset_rel_next_iter = False
+
+        # store motion information
         try:
             x, y = self.sensor.get_motion(timeout=0.001)
             self.last_rec = time.time()
@@ -27,18 +36,94 @@ class MotionSensor:
             pass
 
     def get_rel_motion(self, get_dt=False):
-        ret_mot = np.array([self.rel_x, self.rel_y])
-        self.rel_x = self.rel_y = 0  # reset
+        rel_mot = np.array([self.rel_x, self.rel_y])
+        self.reset_rel_next_iter = True
 
         dt = self.last_rec - self.last_rel_t
         self.last_rel_t = time.time()
 
         if get_dt:
-            return ret_mot, dt
-        return ret_mot
+            return rel_mot, dt
+        return rel_mot
 
     def get_abs_motion(self):
         return np.array([self.abs_x, self.abs_y])
+
+    def get_vel(self, reset=True):
+        rel_mot, dt = self.get_rel_motion(get_dt=True)
+        return rel_mot / dt
+
+
+class MotionSensors:  # 3 degrees of freedom
+
+    # front, then side sensor mapping; first int is motion axis index of a sensor, second is the 3 DoF axis index
+    DEFAULT_AXIS_MAPPING = [((0, 0), (1, 2)), ((0, 1), (1, 2))]  # TODO test
+
+    def __init__(self, front_flo: MotionSensor, side_flo: MotionSensor,
+                 axis_mapping: List[Tuple[Tuple[int, int], Tuple[int, int]]] = DEFAULT_AXIS_MAPPING):
+        self.front_flo = front_flo
+        self.side_flo = side_flo
+        self.axis_mapping = axis_mapping
+
+    def loop(self):
+        self.front_flo.loop()
+        self.side_flo.loop()
+
+    def _combine_sensor_rec(self, recs):
+        # axis mapping be like [((0, 0), (1, 1)), ((0, 1), (1, 2))]
+        xyz = [[], [], []]  # gather motion recording for each axis, then mean when sensors have axis overlap
+        for rec, amap in zip(recs, self.axis_mapping):
+            for _from, _to in amap:
+                xyz[_to].append(rec[_from])
+        return np.mean(xyz, axis=1)
+
+    def get_rel_motion(self, get_dt=False):
+        rel_mots = [self.front_flo.get_rel_motion(get_dt), self.side_flo.get_rel_motion(get_dt)]
+        xyz = self._combine_sensor_rec(rel_mots)
+        return xyz
+
+    def get_abs_motion(self):
+        abs_mots = [self.front_flo.get_abs_motion(), self.side_flo.get_abs_motion()]
+        xyz = self._combine_sensor_rec(abs_mots)
+        return xyz
+
+    def get_vel(self):
+        vels = [self.front_flo.get_vel(), self.side_flo.get_vel()]
+        xyz = self._combine_sensor_rec(vels)
+        return xyz
+
+
+class SmoothMotion:  # MotionSensor wrapper
+    def __init__(self, flo: Union[MotionSensor, MotionSensors], smooth_dt):
+        self.flo = flo
+        self.smooth_dt = smooth_dt
+
+        self.rel_mots = deque()
+        self.dts = deque()
+
+    def get_vel(self):
+        # computes velocity over time by weighting velocities in the given past window by their dt,
+        # that is, velocities that were present for longer are weighted higher in the mean
+        rel_mot, dt = self.flo.get_rel_motion(get_dt=True)
+        self.rel_mots.append(rel_mot)
+        self.dts.append(dt)
+
+        rel_mots = np.asarray(self.rel_mots)
+        dts = np.asarray(self.dts)  # example: 3, 2, 3, 1, 1
+
+        past = np.cumsum(dts[::-1])  # 10, 7, 5, 2, 1
+        within_t = past - self.smooth_dt  # smooth_dt = 6; 4, 1, -1, -4, -5
+        t_occupied = np.clip(dts - within_t, 0, None)  # 0, 1, 4, 5, 6
+        t_occupied = np.min([t_occupied, dts], axis=1)  # 0, 1, 3, 1, 1
+        weight = t_occupied / t_occupied.sum()  # normalize
+
+        smooth_rel_mot = (rel_mots * weight).sum()
+
+        while sum(self.dts) > self.smooth_dt * 4:  # have some cushion
+            self.rel_mots.popleft()
+            self.dts.popleft()
+
+        return smooth_rel_mot
 
 
 def _main():  # example code with OmniDrive
