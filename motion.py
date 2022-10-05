@@ -13,21 +13,21 @@ class MotionSensor:
                                    spi_cs_gpio=BG_CS_FRONT_BCM if spi_slot == 'front' else BG_CS_BACK_BCM)
         self.sensor.set_orientation(invert_x=True, invert_y=False, swap_xy=False)
 
-        self.last_rel_t, self.last_rec = time.time(), 0
+        self._last_rel_t, self._last_rec = time.time(), 0
         self.rel_x, self.rel_y = 0, 0
         self.abs_x, self.abs_y = 0, 0
-        self.reset_rel_next_iter = False
+        self._reset_rel_next_iter = False
 
     def loop(self):
         # reset relative motion if get_rel_motion() was called after the previous loop() run
-        if self.reset_rel_next_iter:
+        if self._reset_rel_next_iter:
             self.rel_x, self.rel_y = 0, 0
-            self.reset_rel_next_iter = False
+            self._reset_rel_next_iter = False
 
         # store motion information
         try:
             x, y = self.sensor.get_motion(timeout=0.001)
-            self.last_rec = time.time()
+            self._last_rec = time.time()
             self.rel_x += x
             self.rel_y += y
             self.abs_x += x
@@ -37,10 +37,10 @@ class MotionSensor:
 
     def get_rel_motion(self, get_dt=False):
         rel_mot = np.array([self.rel_x, self.rel_y])
-        self.reset_rel_next_iter = True
+        self._reset_rel_next_iter = True
 
-        dt = self.last_rec - self.last_rel_t
-        self.last_rel_t = time.time()
+        dt = self._last_rec - self._last_rel_t
+        self._last_rel_t = time.time()
 
         if get_dt:
             return rel_mot, dt
@@ -98,19 +98,20 @@ class SmoothMotion:  # MotionSensor wrapper
         self.flo = flo
         self.smooth_dt = smooth_dt
 
-        self.rel_mots = deque()
-        self.dts = deque()
+        self._rel_mots = deque()
+        self._dts = deque()
 
     def get_vel(self):
         # computes velocity over time by weighting velocities in the given past window by their dt,
         # that is, velocities that were present for longer are weighted higher in the mean
         rel_mot, dt = self.flo.get_rel_motion(get_dt=True)
-        self.rel_mots.append(rel_mot)
-        self.dts.append(dt)
+        self._rel_mots.append(rel_mot)
+        self._dts.append(dt)
 
-        rel_mots = np.asarray(self.rel_mots)
-        dts = np.asarray(self.dts)  # example: 3, 2, 3, 1, 1
+        rel_mots = np.asarray(self._rel_mots)
+        dts = np.asarray(self._dts)  # example: 3, 2, 3, 1, 1
 
+        # this might be overcomplicated, who knows
         past = np.cumsum(dts[::-1])  # 10, 7, 5, 2, 1
         within_t = past - self.smooth_dt  # smooth_dt = 6; 4, 1, -1, -4, -5
         t_occupied = np.clip(dts - within_t, 0, None)  # 0, 1, 4, 5, 6
@@ -119,9 +120,9 @@ class SmoothMotion:  # MotionSensor wrapper
 
         smooth_rel_mot = (rel_mots * weight).sum()
 
-        while sum(self.dts) > self.smooth_dt * 4:  # have some cushion
-            self.rel_mots.popleft()
-            self.dts.popleft()
+        while sum(self._dts) > self.smooth_dt * 4:  # have some cushion
+            self._rel_mots.popleft()
+            self._dts.popleft()
 
         return smooth_rel_mot
 
