@@ -1,12 +1,13 @@
 import time
 import argparse
 import numpy as np
-from pmw3901 import PMW3901, PAA5100, BG_CS_FRONT_BCM, BG_CS_BACK_BCM
+# from pmw3901 import PMW3901, PAA5100, BG_CS_FRONT_BCM, BG_CS_BACK_BCM
+PMW3901 = PAA5100 = BG_CS_FRONT_BCM = BG_CS_BACK_BCM = None
 from typing import Callable, Any, Union, Tuple, List
 from collections import deque
 
 
-class MotionSensor:
+class MotionSensor:  # on-ball movement tracking
     def __init__(self, spi_port, spi_slot, sensor_class=PAA5100):
         # spi_port=0, spi_slot='front' for the front sensor
         self.sensor = sensor_class(spi_port=spi_port, spi_cs=1,
@@ -117,6 +118,12 @@ class SmoothMotion:  # MotionSensor wrapper
         t_occupied = np.clip(dts - within_t, 0, None)  # 0, 1, 4, 5, 6
         t_occupied = np.min([t_occupied, dts], axis=1)  # 0, 1, 3, 1, 1
         weight = t_occupied / t_occupied.sum()  # normalize
+
+        # # TODO test if this works as good
+        # # simpler smoothing, weighing closer timepoints higher
+        # past = -past  # -10, -7, -5, -2, -1
+        # within_t = np.clip(past - self.smooth_dt, 0, None)  # 0, 0, 1, 4, 5
+        # weight = within_t / within_t.sum()
 
         smooth_rel_mot = (rel_mots * weight).sum()
 

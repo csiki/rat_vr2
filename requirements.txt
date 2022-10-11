@@ -8,6 +8,7 @@ sklearn
 torch
 simple-pid
 sshkeyboard
+gym
 
 RPi.GPIO
 pmw3901

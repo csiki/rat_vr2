@@ -2,3 +2,4 @@ venv/
 .idea/
 tmp/
 tmp.py
+__pycache__/

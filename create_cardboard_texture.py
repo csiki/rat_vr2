@@ -12,13 +12,14 @@ word_ppc = word_ppi / 2.54
 base_path = r'c:\wut\ratsplaydoom\cardboard\doom-ii-map01-entryway-3dmodel\textures'
 to_path = r'c:\wut\ratsplaydoom\cardboard\cardboard_textures'
 
-room_name = 'corridor'
-wall_height = 10.  # 10. and 13.
-to_size_cm = (wall_height, 7.7)  # h, w
-src_img_name = 'bigdoor1.png'
-stretch = True
-top_cut = 24
-bot_cut = 0
+room_name = 'big_room'
+wall_width = 10.2
+wall_height = 13  # 10. and 13.
+to_size_cm = (wall_height, wall_width)
+src_img_name = 'ashwall3.png'
+stretch = False
+top_cut = 32
+# bot_cut = 0
 
 src_img_path = os.path.join(base_path, src_img_name)
 src_img = plt.imread(src_img_path)
