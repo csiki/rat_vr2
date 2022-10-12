@@ -25,8 +25,7 @@ class OmniDrive:
     AXES = 3  # forward/backward, left/right strafe, left/right turn
     PWM_2_MOTION_FUN = lambda x, *p: x * p[0] + p[1]  # uses pwm_to_motion_p params for each axis
 
-    def __init__(self, roller_pins, lin_act_pins, up_trans_t=6, down_trans_t=5, pwm_freq=1000,
-                 calib_path='omni_calib.pckl'):
+    def __init__(self, roller_pins, lin_act_pins, up_trans_t=6, down_trans_t=5, pwm_freq=1000, calib_path=None):
 
         self.roller_dirs = np.array(['left', 'right'])
         self.simple_dirs_v = {'forward': [1., 0., 0.], 'backward': [-1., 0., 0.],  # v, vn, w
@@ -605,12 +604,7 @@ def _onmni_test():
     roller2_pins = {'right': 25, 'left': 26, 'pwm': 12}
     roller_pins = [roller0_pins, roller1_pins, roller2_pins]
 
-    opt_trans_mx = None
-    # opt_trans_mx = [[ 1.16646569,  0.5,         0.1634709 ],
-    #                 [-0.00351549, -1.,          0.16910739],
-    #                 [-1.17349667,  0.5,         0.17474389]]
-    omni_drive = OmniDrive(roller_pins, lin_act_pins, up_trans_t=6, down_trans_t=6, pwm_freq=1000,
-                           calib_path=calib_path)
+    omni_drive = OmniDrive(roller_pins, lin_act_pins, up_trans_t=4, down_trans_t=4, pwm_freq=1000, calib_path=calib_path)
     omni_drive.setup()
 
     def exit_code(*args):
@@ -627,5 +621,57 @@ def _onmni_test():
     omni_drive.cleanup()
 
 
+def man_drive():
+
+    lin_act_pins = {'up': 22, 'down': 4, 'enable': 27}
+    roller0_pins = {'right': 23, 'left': 24, 'pwm': 18}
+    roller1_pins = {'right': 5, 'left': 6, 'pwm': 13}
+    roller2_pins = {'right': 25, 'left': 26, 'pwm': 12}
+    roller_pins = [roller0_pins, roller1_pins, roller2_pins]
+
+    omni_drive = OmniDrive(roller_pins, lin_act_pins, up_trans_t=4, down_trans_t=4, pwm_freq=1000)
+    omni_drive.setup()
+
+    def exit_code(*args):
+        omni_drive.cleanup()
+        exit(0)
+
+    signal.signal(signal.SIGINT, exit_code)
+
+    class _key_listener:
+        key_mapping = {'up': 'forward', 'down': 'backward', 'right': 'right_strafe', 'left': 'left_strafe',
+                       'w': 'forward', 's': 'backward', 'd': 'right_strafe', 'a': 'left_strafe',
+                       'k': 'left_turn', 'l': 'right_turn'}
+
+        def _press(self, key):
+            if key in self.key_mapping:
+                self.current_dir += omni_drive.simple_dirs_v[self.key_mapping[key]]
+                wheel_dir, wheel_dc = omni_drive.calc_wheel_v(self.current_dir)
+                omni_drive.drive(wheel_dir, wheel_dc)
+
+        def _release(self, key):
+            if key in self.key_mapping:
+                self.current_dir -= omni_drive.simple_dirs_v[self.key_mapping[key]]
+                if np.abs(self.current_dir).sum() > 1e-4:
+                    wheel_dir, wheel_dc = omni_drive.calc_wheel_v(self.current_dir)
+                    omni_drive.drive(wheel_dir, wheel_dc)
+                else:
+                    omni_drive.stop()
+
+        def __init__(self):
+            self.current_dir = np.zeros(3)
+            print('Press Esc to quit, or up, down, left, right, K, or L to roll the ball..')
+            sshkeyboard.listen_keyboard(
+                on_press=self._press,
+                on_release=self._release,
+            )
+
+    _key_listener()
+    omni_drive.cleanup()
+
+
 if __name__ == '__main__':
-    _onmni_test()
+    if len(sys.argv) > 1 and sys.argv[1] == 'man':
+        man_drive()
+    else:
+        _onmni_test()

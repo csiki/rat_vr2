@@ -43,18 +43,48 @@ class LinActuator:
         print('LinActuator cleanup done')
 
 
-def man(dir_, t):
+def man_t(dir_, t):
     lin_act_pins = {'up': 22, 'down': 4, 'enable': 27}
     lin_act = LinActuator(lin_act_pins)
     lin_act.setup()
 
-    def exit_code(*args):
+    def _exit_code(*args):
         lin_act.cleanup()
         exit(0)
 
-    signal.signal(signal.SIGINT, exit_code)
+    signal.signal(signal.SIGINT, _exit_code)
 
     lin_act.drive(dir_, t, blocking=True)
+    lin_act.cleanup()
+
+
+def man_drive():
+    from sshkeyboard import listen_keyboard
+
+    lin_act_pins = {'up': 22, 'down': 4, 'enable': 27}
+    lin_act = LinActuator(lin_act_pins)
+    lin_act.setup()
+
+    def _exit_code(*args):
+        lin_act.cleanup()
+        exit(0)
+
+    signal.signal(signal.SIGINT, _exit_code)
+
+    def _press(key):
+        if key == 'up' or key == 'down':
+            lin_act.drive(key, blocking=False)
+
+    def _release(key):
+        if key == 'up' or key == 'down':
+            lin_act.stop()
+
+    print('Press Esc to quit, or up and down to move actuator..')
+    listen_keyboard(
+        on_press=_press,
+        on_release=_release,
+    )
+
     lin_act.cleanup()
 
 
@@ -62,4 +92,7 @@ if __name__ == '__main__':
     dir_ = sys.argv[1]
     t = float(sys.argv[2]) if len(sys.argv) > 2 else 4
 
-    man(dir_, t)
+    if dir_ == 'man':
+        man_drive()
+    else:
+        man_t(dir_, t)

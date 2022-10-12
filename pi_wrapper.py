@@ -21,7 +21,7 @@ class PiOverSocket:
         self.host_id = id(self)  # used on raspberry to establish correspondence between wrapped and real objects
 
         for fun_name, fun in self.funs:
-            f = self._get_fun(fun)
+            f = self._get_fun(fun)  # TODO not _send_cmd and _get_fun
             f.__name__ = fun_name
             setattr(self, fun_name, f)
 
@@ -44,7 +44,6 @@ class PiOverSocket:
 class PiMotionSensor(MotionSensor, PiOverSocket):
     def __init__(self, conn_sock: socket.socket, *args, **kwargs):
         PiOverSocket.__init__(self, conn_sock, self.__class__.__base__)
-        getattr(self, '__init__')(*args, **kwargs)
 
 
 # TODO rest of the wrappers, same as PiMotionSensor
