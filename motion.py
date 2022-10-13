@@ -2,7 +2,7 @@ import time
 import argparse
 import numpy as np
 # from pmw3901 import PMW3901, PAA5100, BG_CS_FRONT_BCM, BG_CS_BACK_BCM
-PMW3901 = PAA5100 = BG_CS_FRONT_BCM = BG_CS_BACK_BCM = None
+PMW3901 = PAA5100 = BG_CS_FRONT_BCM = BG_CS_BACK_BCM = None  # TODO testing
 from typing import Callable, Any, Union, Tuple, List
 from collections import deque
 
