@@ -1,10 +1,16 @@
 import time
 import argparse
 import numpy as np
-# from pmw3901 import PMW3901, PAA5100, BG_CS_FRONT_BCM, BG_CS_BACK_BCM
-PMW3901 = PAA5100 = BG_CS_FRONT_BCM = BG_CS_BACK_BCM = None  # TODO testing
+import importlib
 from typing import Callable, Any, Union, Tuple, List
 from collections import deque
+from importlib.util import find_spec
+
+if find_spec('pmw3901'):
+    from pmw3901 import PMW3901, PAA5100, BG_CS_FRONT_BCM, BG_CS_BACK_BCM
+else:  # testing
+    PMW3901 = PAA5100 = BG_CS_FRONT_BCM = BG_CS_BACK_BCM = None
+    print('pmw3901 NOT FOUND')
 
 
 class MotionSensor:  # on-ball movement tracking
@@ -131,7 +137,7 @@ class SmoothMotion:  # MotionSensor wrapper
             self._rel_mots.popleft()
             self._dts.popleft()
 
-        return smooth_rel_mot
+        return smooth_rel_mot.astype(np.float32)
 
 
 def _main():  # example code with OmniDrive

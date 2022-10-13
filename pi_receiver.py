@@ -1,13 +1,17 @@
+import sys
+
 import numpy
 import inspect
 import pickle
 import socket
+import traceback
 
 from motion import MotionSensor, MotionSensors, SmoothMotion
 from omni_drive import OmniDrive
 from actuator import LinActuator
 from player_movement import PlayerMovement, Feedback
 import pi_wrapper
+from pi_wrapper import PiSmoothMotion, PiMotionSensor, PiOverSocket
 
 
 # run loop, parse pc messages over network and call corresponding wrapped functions
@@ -26,34 +30,38 @@ import pi_wrapper
 
 def main():
 
+    # remote pc/server address
+    server_host, server_port = sys.argv[1], 4444
+
     # devices  # TODO add lever, reward, trainer
     device_clss = [MotionSensor, MotionSensors, SmoothMotion, OmniDrive, LinActuator, PlayerMovement, Feedback]
     device_cls_names = [cls.__name__ for cls in device_clss]
     device_objs = [dict() for _ in device_clss]  # host id  -> device obj for each class
 
-    server_name = 'LAPTOP-AOH10NOP'
-    server_host = socket.gethostbyname(server_name)  # '192.168.0.129'
-    server_port = 4444
-
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-
-        # TODO test
         sock.connect((server_host, server_port))
-        data = sock.recv(4096)
-        data = pickle.loads(data)
-        print(f"Received: {data}")
-        sock.sendall(pickle.dumps(('return_value', None)))
-        # TODO test end
+        print(f'Connected to server @ {server_host}:{server_port}..')
 
-        while True:  # TODO test
+        while True:
+
+            # receive command
             # cmd example: {'o': id(self), 'c': self.base_cls.__name__, 'f': fun.__name__, 'a': args, 'kwa': kwargs}
-            cmd = pickle.loads(sock.recv(4096))
+            cmd = sock.recv(4096)
+            if len(cmd) == 0:
+                print('Server disconnected..')
+                break
+
+            print('Load cmd:')
+            cmd = pickle.loads(cmd)
+            print('<-', cmd)
+
             ret_val = None
             exception = None
 
             # break free
             if cmd['f'] == '!STOP!':
+                print('Remotely stopped..')
                 break
 
             # check command validity
@@ -85,9 +93,10 @@ def main():
                     ret_val = getattr(device_objs[device_cls_i][cmd['o']], cmd['f'])(*args, **kwargs)
 
             except Exception as e:
-                exception = e
+                exception = Exception(str(e) + ' at:\n' + str(traceback.format_exc()))
 
             # issue response
+            print('->', (ret_val, exception))
             sock.sendall(pickle.dumps((ret_val, exception)))
 
     # optional cleanup on each device object

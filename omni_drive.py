@@ -621,7 +621,7 @@ def _onmni_test():
     omni_drive.cleanup()
 
 
-def man_drive():
+def man_drive(speed):
 
     lin_act_pins = {'up': 22, 'down': 4, 'enable': 27}
     roller0_pins = {'right': 23, 'left': 24, 'pwm': 18}
@@ -646,16 +646,17 @@ def man_drive():
         def _press(self, key):
             if key in self.key_mapping:
                 self.current_dir += omni_drive.simple_dirs_v[self.key_mapping[key]]
-                wheel_dir, wheel_dc = omni_drive.calc_wheel_v(self.current_dir)
+                wheel_dir, wheel_dc = omni_drive.calc_wheel_v(self.current_dir * speed)
                 omni_drive.drive(wheel_dir, wheel_dc)
 
         def _release(self, key):
             if key in self.key_mapping:
                 self.current_dir -= omni_drive.simple_dirs_v[self.key_mapping[key]]
                 if np.abs(self.current_dir).sum() > 1e-4:
-                    wheel_dir, wheel_dc = omni_drive.calc_wheel_v(self.current_dir)
+                    wheel_dir, wheel_dc = omni_drive.calc_wheel_v(self.current_dir * speed)
                     omni_drive.drive(wheel_dir, wheel_dc)
                 else:
+                    print('STOP')
                     omni_drive.stop()
 
         def __init__(self):
@@ -672,6 +673,6 @@ def man_drive():
 
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'man':
-        man_drive()
+        man_drive(float(sys.argv[2]) if len(sys.argv) > 2 else .7)
     else:
         _onmni_test()
