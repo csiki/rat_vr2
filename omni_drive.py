@@ -3,15 +3,20 @@ import time
 import signal
 import sched
 import pickle
+from importlib.util import find_spec
 
 import matplotlib.pyplot as plt
 import numpy as np
-import RPi.GPIO as GPIO
 from scipy.optimize import curve_fit
 from typing import Callable, Any, Union, Tuple, List
 import simple_pid
 import sshkeyboard
 from collections import namedtuple
+
+if find_spec('RPi'):
+    import RPi.GPIO as GPIO
+else:
+    GPIO = None
 
 from actuator import LinActuator
 from motion import MotionSensor, MotionSensors
@@ -25,7 +30,8 @@ class OmniDrive:
     AXES = 3  # forward/backward, left/right strafe, left/right turn
     PWM_2_MOTION_FUN = lambda x, *p: x * p[0] + p[1]  # uses pwm_to_motion_p params for each axis
 
-    def __init__(self, roller_pins, lin_act_pins, up_trans_t=6, down_trans_t=5, pwm_freq=1000, calib_path=None):
+    def __init__(self, roller_pins, lin_act_pins, up_trans_t=4, down_trans_t=4, mount_tracking=False,
+                 pwm_freq=1000, calib_path=None):
 
         self.roller_dirs = np.array(['left', 'right'])
         self.simple_dirs_v = {'forward': [1., 0., 0.], 'backward': [-1., 0., 0.],  # v, vn, w
@@ -61,6 +67,8 @@ class OmniDrive:
 
         self.up_trans_t = up_trans_t
         self.down_trans_t = down_trans_t
+        self.mount_tracking = mount_tracking
+        self.mounted = None
 
         self.driving = False
         self.rolling = False
@@ -102,6 +110,11 @@ class OmniDrive:
         self.lin_act.setup()
         print('OmniDrive setup done')
 
+        if self.mount_tracking:  # start in a non-mounted = rat movement position
+            self.mount(blocking=True)
+            self.letgo(blocking=True)
+            self.mounted = False
+
     def save(self, calib_path):
         calib = {'noise_floors': self.noise_floors, 'pwm_to_motion_p': self.pwm_to_motion_p,
                  'pid_p': self.pid_p, 'pid_dt': self.pid_dt, 'pid_err_scalers': self.pid_err_scalers,
@@ -112,13 +125,24 @@ class OmniDrive:
         with open(calib_path, 'wb') as f:
             pickle.dump(calib, f)
 
+    def _set_mount_pos(self, mounted):  # used by mount() and letgo()
+        self.mounted = mounted
+
     def mount(self, blocking=False, callback=None):
         self.lin_act.drive('down', self.down_trans_t, blocking=blocking)
+        if blocking:
+            self.mounted = True
+        elif self.mount_tracking:
+            self.scheduler.enter(self.down_trans_t, 1, self._set_mount_pos, kwargs={'mounted': True})
         if callback is not None:
             self.scheduler.enter(self.down_trans_t, 2, callback)
 
     def letgo(self, blocking=False, callback=None):
         self.lin_act.drive('up', self.up_trans_t, blocking=blocking)
+        if blocking:
+            self.mounted = False
+        elif self.mount_tracking:
+            self.scheduler.enter(self.up_trans_t, 1, self._set_mount_pos, kwargs={'mounted': False})
         if callback is not None:
             self.scheduler.enter(self.up_trans_t, 2, callback)
 
@@ -139,7 +163,9 @@ class OmniDrive:
             return wheel_dir, wheel_dc, wheel_v, wheel_v_normed
         return wheel_dir, wheel_dc
 
-    def drive(self, wheel_dir, wheel_dc, t=None, blocking=False, callback=None):
+    def drive(self, wheel_dir, wheel_dc, t=None, blocking=False, unmount=False, callback=None):
+        if self.mount_tracking and not self.mounted:
+            self.mount()
 
         if self.driving or self.rolling:
             print(f'OmniDrive already running (driving={self.driving}, rolling={self.rolling})! '
@@ -165,9 +191,9 @@ class OmniDrive:
             except KeyboardInterrupt:
                 pass
             finally:
-                self.stop()
+                self.stop(unmount)
         elif t is not None and not blocking:
-            self.scheduler.enter(t, 1, self.stop)
+            self.scheduler.enter(t, 1, self.stop, kwargs={'unmount': unmount})
 
         if t is not None and callback is not None:
             self.scheduler.enter(t, 2, callback)
@@ -184,7 +210,7 @@ class OmniDrive:
         wheel_dir, wheel_dc = self.calc_wheel_v(drive_v)
         return self.drive(wheel_dir, wheel_dc, t, blocking, callback)
 
-    def roll(self, feedback: Feedback, eps: float, blocking=False, callback: Callable[[], Any] = None):
+    def roll(self, feedback: Feedback, eps: float, blocking=False, unmount=False, callback: Callable[[], Any] = None):
         # performs movement on all three axis according to feedback using 1 pid controller per axis
         # if no blocking, main functionality is run in loop(), only the function to run in there is defined here + setup
         # overall dynamics:
@@ -218,7 +244,7 @@ class OmniDrive:
                 wheel_dir, wheel_dc = self.calc_wheel_v(drive_v)
                 self.drive(wheel_dir, wheel_dc)
 
-            self.stop()
+            self.stop(unmount)
             if callback:
                 callback()
 
@@ -231,7 +257,7 @@ class OmniDrive:
 
             # when done
             if np.abs(np.max(neg_err)) < eps or not self.rolling:
-                self.stop()  # self.rolling -> False
+                self.stop(unmount)  # self.rolling -> False  # TODO see if self is actually seen here
                 if callback:
                     callback()
                 return
@@ -246,7 +272,7 @@ class OmniDrive:
         self.rolling = True
         return True
 
-    def stop(self):
+    def stop(self, unmount=False):
         for i, pins in enumerate(self.roller_pins):
             GPIO.output(pins['left'], GPIO.LOW)
             GPIO.output(pins['right'], GPIO.LOW)
@@ -254,6 +280,9 @@ class OmniDrive:
 
         self.driving = False
         self.rolling = False
+
+        if unmount and self.mount_tracking and self.mounted:
+            self.letgo()
 
     def loop(self):
         self.scheduler.run(blocking=False)
@@ -263,7 +292,7 @@ class OmniDrive:
             self.roll_fun(self)
 
     def cleanup(self):
-        self.stop()
+        self.stop(unmount=self.mount_tracking)
         self.lin_act.cleanup()
         GPIO.cleanup()
         print('OmniDrive cleanup done')

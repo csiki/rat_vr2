@@ -2,7 +2,13 @@ import sys
 import time
 import signal
 import sched
-import RPi.GPIO as GPIO
+from importlib.util import find_spec
+
+if find_spec('RPi'):
+    import RPi.GPIO as GPIO
+else:
+    GPIO = None
+    print('RPi not found')
 
 
 class LinActuator:

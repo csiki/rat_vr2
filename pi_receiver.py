@@ -52,9 +52,8 @@ def main():
                 print('Server disconnected..')
                 break
 
-            print('Load cmd:')
             cmd = pickle.loads(cmd)
-            print('<-', cmd)
+            # print('<-', cmd)
 
             ret_val = None
             exception = None
@@ -96,13 +95,14 @@ def main():
                 exception = Exception(str(e) + ' at:\n' + str(traceback.format_exc()))
 
             # issue response
-            print('->', (ret_val, exception))
+            # print('->', (ret_val, exception))
             sock.sendall(pickle.dumps((ret_val, exception)))
 
     # optional cleanup on each device object
     for device_cls_i, cls in enumerate(device_clss):
-        for obj in device_objs[device_cls_i]:
-            if 'cleanup' in inspect.getmembers(cls, predicate=inspect.isfunction):
+        funs = [fname for fname, f in inspect.getmembers(cls, predicate=inspect.isfunction)]
+        for obj in device_objs[device_cls_i].values():
+            if 'cleanup' in funs:
                 obj.cleanup()
 
 

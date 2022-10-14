@@ -132,18 +132,12 @@ class SmoothMotion:  # MotionSensor wrapper
         rel_mots = np.asarray(self._rel_mots)  # (time, axes)
         dts = np.asarray(self._dts)  # example: 3, 2, 3, 1, 1
 
-        print('shape', rel_mots.shape)
-
         # in the time window given, weights recordings with longer dt higher
         smooth_rel_mot = (rel_mots * self.smoothing(dts)[:, None]).sum(axis=0)
 
-        print('while', sum(self._dts) > self.smooth_dt * 4, sum(self._dts), self.smooth_dt * 4)
         while sum(self._dts) > self.smooth_dt * 4:  # have some cushion
             self._rel_mots.popleft()
             self._dts.popleft()
-        print('while2', sum(self._dts) > self.smooth_dt * 4, sum(self._dts), self.smooth_dt * 4)
-
-        print('sha2', smooth_rel_mot.shape)
 
         return smooth_rel_mot.astype(np.float32)
 
