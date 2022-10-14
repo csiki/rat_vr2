@@ -29,25 +29,27 @@ class MotionSensor:  # on-ball movement tracking
         # reset relative motion if get_rel_motion() was called after the previous loop() run
         if self._reset_rel_next_iter:
             self.rel_x, self.rel_y = 0, 0
+            self._last_rel_t = self._last_rec
             self._reset_rel_next_iter = False
 
         # store motion information
         try:
-            x, y = self.sensor.get_motion(timeout=0.001)
             self._last_rec = time.time()
+            x, y = self.sensor.get_motion(timeout=0.001)
             self.rel_x += x
             self.rel_y += y
             self.abs_x += x
             self.abs_y += y
-        except RuntimeError:
-            pass
+        except RuntimeError as e:
+            pass  # timed out waiting for motion data
 
     def get_rel_motion(self, get_dt=False):
         rel_mot = np.array([self.rel_x, self.rel_y])
         self._reset_rel_next_iter = True
 
+        print('dt:', self._last_rec, self._last_rel_t)
         dt = self._last_rec - self._last_rel_t
-        self._last_rel_t = time.time()
+        # self._last_rel_t = time.time()
 
         if get_dt:
             return rel_mot, dt
@@ -108,6 +110,18 @@ class SmoothMotion:  # MotionSensor wrapper
         self._rel_mots = deque()
         self._dts = deque()
 
+        def _smoothing(dts):
+            # windowing of previous pos recordings to compute vel or acc
+            # in the time window given, weights recordings with longer dt higher; same as in player movement
+            past = np.cumsum(dts[::-1])[::-1]  # 10, 7, 5, 2, 1
+            within_t = past - smooth_dt  # smooth_dt = 6; 4, 1, -1, -4, -5
+            t_occupied = np.clip(dts - within_t, 0, None)  # 0, 1, 4, 5, 6
+            t_occupied = np.min([t_occupied, dts], axis=0)  # 0, 1, 3, 1, 1
+            weight = t_occupied / t_occupied.sum()  # normalize
+            return weight
+
+        self.smoothing = _smoothing
+
     def get_vel(self):
         # computes velocity over time by weighting velocities in the given past window by their dt,
         # that is, velocities that were present for longer are weighted higher in the mean
@@ -115,27 +129,21 @@ class SmoothMotion:  # MotionSensor wrapper
         self._rel_mots.append(rel_mot)
         self._dts.append(dt)
 
-        rel_mots = np.asarray(self._rel_mots)
+        rel_mots = np.asarray(self._rel_mots)  # (time, axes)
         dts = np.asarray(self._dts)  # example: 3, 2, 3, 1, 1
 
-        # this might be overcomplicated, who knows
-        past = np.cumsum(dts[::-1])  # 10, 7, 5, 2, 1
-        within_t = past - self.smooth_dt  # smooth_dt = 6; 4, 1, -1, -4, -5
-        t_occupied = np.clip(dts - within_t, 0, None)  # 0, 1, 4, 5, 6
-        t_occupied = np.min([t_occupied, dts], axis=1)  # 0, 1, 3, 1, 1
-        weight = t_occupied / t_occupied.sum()  # normalize
+        print('shape', rel_mots.shape)
 
-        # # TODO test if this works as good
-        # # simpler smoothing, weighing closer timepoints higher
-        # past = -past  # -10, -7, -5, -2, -1
-        # within_t = np.clip(past - self.smooth_dt, 0, None)  # 0, 0, 1, 4, 5
-        # weight = within_t / within_t.sum()
+        # in the time window given, weights recordings with longer dt higher
+        smooth_rel_mot = (rel_mots * self.smoothing(dts)[:, None]).sum(axis=0)
 
-        smooth_rel_mot = (rel_mots * weight).sum()
-
+        print('while', sum(self._dts) > self.smooth_dt * 4, sum(self._dts), self.smooth_dt * 4)
         while sum(self._dts) > self.smooth_dt * 4:  # have some cushion
             self._rel_mots.popleft()
             self._dts.popleft()
+        print('while2', sum(self._dts) > self.smooth_dt * 4, sum(self._dts), self.smooth_dt * 4)
+
+        print('sha2', smooth_rel_mot.shape)
 
         return smooth_rel_mot.astype(np.float32)
 

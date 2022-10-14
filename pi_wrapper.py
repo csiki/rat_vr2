@@ -50,6 +50,7 @@ class PiOverSocket:
         if len(pi_ret) == 0:
             raise ConnectionError('Pi disconnected')
         ret_val, exception = pickle.loads(pi_ret)
+        print('a:', ret_val, exception)
         if exception:
             raise exception from exception
         return ret_val
@@ -88,9 +89,10 @@ if __name__ == '__main__':
         with conn:
             print(f"Connected by {addr}")
             p = PiMotionSensor(conn, 0, 'front')
-            ps = PiSmoothMotion(conn, p, 2)
+            ps = PiSmoothMotion(conn, p, 0.1)
 
             for i in range(100):
                 p.loop()
-                print(p.get_vel(), '- smooth -> ', print(ps.get_vel()))  # TODO ps returns None
-                time.sleep(1)
+                print(p.get_vel(), '- smooth -> ', ps.get_vel())  # TODO ps returns None
+                # print(ps.get_vel())
+                time.sleep(.2)
