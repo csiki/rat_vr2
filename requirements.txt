@@ -8,6 +8,7 @@ torch
 simple-pid
 sshkeyboard
 gym
+vizdoom
 
 RPi.GPIO
 pmw3901
