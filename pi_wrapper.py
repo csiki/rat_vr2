@@ -30,7 +30,19 @@ from player_movement import PlayerMovement, Feedback
 #   pi: PiCallbacks.registered{} has the same
 
 
+class PiCallback(Callable):
+    def __init__(self, f: Callable):
+        self.wrap_id = id(f)
+        self.called = False
+
+    def __call__(self, *args, **kwargs):
+        self.called = True
+
+
 class PiOverSocket:
+
+    CALLBACKS = {}
+
     def __init__(self, _conn_sock: socket.socket, _base_cls: type):
         # not calling super init; only a wrapper
         self.conn_sock = _conn_sock
@@ -58,6 +70,20 @@ class PiOverSocket:
         return lambda *args_, **kwargs_: self._send_cmd(fun, *args_, **kwargs_)
 
     def _send_cmd(self, fun: Callable, *args, **kwargs):
+
+        # if any of the arguments is a function (callable), then add id and store it for a later call
+        def _wrap_arg(a):
+            if isinstance(a, PiOverSocket):
+                return a  # nothing to do, receiver handles everything
+            elif callable(a):
+                wrap_a = PiCallback(a)  # wrap into special callback object to pickle and track if its called
+                PiOverSocket.CALLBACKS[wrap_a.wrap_id] = a  # storing the original to call when needed
+                return wrap_a
+            return a
+
+        args = [_wrap_arg(a) for a in args]
+        kwargs = {k: _wrap_arg(a) for k, a in kwargs.items()}
+
         cmd = {'o': id(self), 'c': self.base_cls.__name__, 'f': fun.__name__, 'a': args, 'kwa': kwargs}
         # print('->', cmd)
         self.conn_sock.sendall(pickle.dumps(cmd))
@@ -66,8 +92,11 @@ class PiOverSocket:
         # print('<-', len(pi_ret), pi_ret)
         if len(pi_ret) == 0:
             raise ConnectionError('Pi disconnected')
-        ret_val, exception = pickle.loads(pi_ret)
-        # print('a:', ret_val, exception)
+        ret_val, exception, callback_ids_to_run = pickle.loads(pi_ret)
+
+        for cbid in callback_ids_to_run:  # run them
+            PiOverSocket.CALLBACKS.pop(cbid)()
+
         if exception:
             raise exception from exception
         return ret_val
@@ -147,14 +176,15 @@ if __name__ == '__main__':
 
             last_od = time.time()
             forward = True
-            loop_delay = .2
+            loop_delay = .8
             loop_times = []
 
             for i in range(200):
                 loop_start = time.time()
 
-                if time.time() - last_od > 4:
-                    od.simple_drive('forward' if forward else 'backward', .7, t=1.5)
+                if time.time() - last_od > 5:
+                    od.simple_drive('forward' if forward else 'backward', .7, t=1.5,
+                                    callback=lambda: od.simple_drive('right_turn', .7, t=2))
                     forward = not forward
                     last_od = time.time()
 

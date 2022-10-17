@@ -200,7 +200,7 @@ class OmniDrive:
 
         return True
 
-    def simple_drive(self, simple_dir: str, speed: float = 1., t=None, blocking=False, callback=None):
+    def simple_drive(self, simple_dir: str, speed: float = 1., t=None, blocking=False, unmount=False, callback=None):
         if simple_dir not in self.simple_dirs_v:
             print(f'Direction {simple_dir} is not any of: {", ".join(self.simple_dirs_v)}!', file=sys.stderr)
             return
@@ -208,7 +208,7 @@ class OmniDrive:
 
         drive_v = self.simple_dirs_v[simple_dir] * speed
         wheel_dir, wheel_dc = self.calc_wheel_v(drive_v)
-        return self.drive(wheel_dir, wheel_dc, t, blocking, callback)
+        return self.drive(wheel_dir, wheel_dc, t, blocking, unmount, callback)
 
     def roll(self, feedback: Feedback, eps: float, blocking=False, unmount=False, callback: Callable[[], Any] = None):
         # performs movement on all three axis according to feedback using 1 pid controller per axis

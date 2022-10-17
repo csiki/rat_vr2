@@ -5,13 +5,15 @@ import inspect
 import pickle
 import socket
 import traceback
+from typing import Callable, Any, Union, Tuple, Dict
+from copy import deepcopy
 
 from motion import MotionSensor, MotionSensors, SmoothMotion
 from omni_drive import OmniDrive
 from actuator import LinActuator
 from player_movement import PlayerMovement, Feedback
 import pi_wrapper
-from pi_wrapper import PiSmoothMotion, PiMotionSensor, PiOverSocket
+from pi_wrapper import PiSmoothMotion, PiMotionSensor, PiOverSocket, PiCallback
 
 
 # run loop, parse pc messages over network and call corresponding wrapped functions
@@ -38,6 +40,8 @@ def main():
     device_cls_names = [cls.__name__ for cls in device_clss]
     device_objs = [dict() for _ in device_clss]  # host id  -> device obj for each class
 
+    device_callback_functions: Dict[int, pi_wrapper.PiCallback] = {}  # host id -> device (wrapped) callback function
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         sock.connect((server_host, server_port))
@@ -57,6 +61,7 @@ def main():
 
             ret_val = None
             exception = None
+            callback_ids_to_run = []
 
             # break free
             if cmd['f'] == '!STOP!':
@@ -66,7 +71,7 @@ def main():
             # check command validity
             if cmd['c'] not in device_cls_names:
                 exception = ValueError(f'Wrong device class: {cmd["c"]}')
-                sock.sendall(pickle.dumps((ret_val, exception)))  # issue response
+                sock.sendall(pickle.dumps((ret_val, exception, callback_ids_to_run)))  # issue response
                 continue
 
             try:
@@ -75,12 +80,17 @@ def main():
                 # assign local real objects to device objects passed as arguments
                 args = list(cmd['a'])
                 kwargs = cmd['kwa']
-                dev_from_wrap_obj = lambda o: device_objs[device_cls_names.index(type(o).__base__.__name__)][o.wrap_id]
 
-                args = [dev_from_wrap_obj(a) if isinstance(a, pi_wrapper.PiOverSocket) else a
-                        for a in args]
-                kwargs = {k: dev_from_wrap_obj(a) if isinstance(a, pi_wrapper.PiOverSocket) else a
-                          for k, a in kwargs.items()}
+                def _unwrap_arg(a):
+                    if isinstance(a, pi_wrapper.PiOverSocket):
+                        return device_objs[device_cls_names.index(type(a).__base__.__name__)][a.wrap_id]
+                    elif isinstance(a, pi_wrapper.PiCallback):
+                        device_callback_functions[a.wrap_id] = a  # just keep track of callbacks
+                        return a
+                    return a
+
+                args = [_unwrap_arg(a) for a in args]
+                kwargs = {k: _unwrap_arg(a) for k, a in kwargs.items()}
 
                 # create device obj - special case of calling a device function
                 if cmd['f'] == '__init__':
@@ -91,12 +101,16 @@ def main():
                 else:
                     ret_val = getattr(device_objs[device_cls_i][cmd['o']], cmd['f'])(*args, **kwargs)
 
+                # add callbacks function ids to return if has run
+                callback_ids_to_run = [cb.wrap_id for cb in device_callback_functions.values() if cb.called]
+                device_callback_functions = {wid: cb for wid, cb in device_callback_functions.items() if not cb.called}
+
             except Exception as e:
                 exception = Exception(str(e) + ' at:\n' + str(traceback.format_exc()))
 
             # issue response
             # print('->', (ret_val, exception))
-            sock.sendall(pickle.dumps((ret_val, exception)))
+            sock.sendall(pickle.dumps((ret_val, exception, callback_ids_to_run)))
 
     # optional cleanup on each device object
     for device_cls_i, cls in enumerate(device_clss):
