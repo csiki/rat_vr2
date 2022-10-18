@@ -1,7 +1,10 @@
 from typing import Optional, Union, List, Tuple
+import time
+from collections import namedtuple
 
 import numpy as np
 import gym
+import vizdoom
 from vizdoom import DoomGame, Button, GameVariable, ScreenFormat, ScreenResolution, AutomapMode
 
 
@@ -28,11 +31,27 @@ class DOOM(gym.Env):
         'living_r': -.1 / 4. / 2.,
         'shot_r': -10,
         'dmg_taken_r': -1,  # / hp
-        'max_player_speed': 420,  # cm/s; rat max is 500
+        'max_player_speed': 500,  # cm/s; rat max is 500
     }
+
+    GAME_VARS = [
+        GameVariable.POSITION_X, GameVariable.POSITION_Y, GameVariable.ANGLE,
+        GameVariable.VELOCITY_X, GameVariable.VELOCITY_Y,
+        GameVariable.HEALTH, GameVariable.DAMAGE_TAKEN, GameVariable.DEAD,
+        GameVariable.HITCOUNT, GameVariable.KILLCOUNT, GameVariable.FRAGCOUNT, GameVariable.ATTACK_READY,
+        GameVariable.ITEMCOUNT, GameVariable.USER1, GameVariable.USER2,
+        GameVariable.AMMO0, GameVariable.AMMO1, GameVariable.AMMO2, GameVariable.AMMO3, GameVariable.AMMO4,
+        GameVariable.AMMO5, GameVariable.AMMO6, GameVariable.AMMO7, GameVariable.AMMO8, GameVariable.AMMO9,
+        GameVariable.SELECTED_WEAPON_AMMO
+    ]
+
+    # named tuple, with names derived by lower casing game var names
+    GAME_STATE_T = namedtuple('game_state_t', [str(v)[str(v).find('.') + 1:].lower() for v in GAME_VARS])
 
     def __init__(self, wad_path, map_id, cfg=DEFAULT_CFG):
         super().__init__()
+
+        self.cfg = cfg
 
         self.game = DoomGame()
         self.game.set_doom_scenario_path(wad_path)
@@ -60,12 +79,7 @@ class DOOM(gym.Env):
         for b in buttons:
             self.game.add_available_button(b)
 
-        vars_needed = [GameVariable.AMMO3, GameVariable.DAMAGE_TAKEN, GameVariable.HEALTH,
-                       GameVariable.POSITION_X, GameVariable.POSITION_Y, GameVariable.ANGLE,
-                       GameVariable.VELOCITY_X, GameVariable.VELOCITY_Y,
-                       GameVariable.USER1, GameVariable.USER2, GameVariable.FRAGCOUNT, GameVariable.HITCOUNT,
-                       GameVariable.ATTACK_READY]
-        for v in vars_needed:
+        for v in DOOM.GAME_VARS:
             self.game.add_available_game_variable(v)
 
         self.game.set_episode_timeout(cfg['ep_timeout'])
@@ -91,25 +105,63 @@ class DOOM(gym.Env):
         #   8 map units = 1 foot ~= 30 cm
         #   35 tics = 1 sec
         #   max speed originally is 30 mu/tic
-        self.cm_per_map_unit = 30.48 / 8.
-        move_speed_rng = cfg['max_player_speed'] / self.cm_per_map_unit
-        move_turn_rng = 100  # TODO
+        self.tic_per_sec = 35.
+        self.map_unit_per_cm = 8. / 30.48
+        self.map_degree_per_rad = 180. / np.pi
+        move_speed_rng = cfg['max_player_speed'] / self.tic_per_sec * self.map_unit_per_cm  # map_unit / tic
+        move_turn_rng = np.pi * self.map_degree_per_rad  # game degree per radian (1 or 180)
         move_space = gym.spaces.Box(low=np.array([-move_speed_rng, -move_speed_rng, -move_turn_rng]),
                                     high=np.array([move_speed_rng, move_speed_rng, move_turn_rng]))
-        shoot_space = gym.spaces.Discrete(1)
+        shoot_space = gym.spaces.Discrete(2)  # shoot or no
         self.action_space = gym.spaces.Tuple([move_space, shoot_space])
-        # self.observation_space =  # TODO img + imp shot + whatever; see game_variables in rat_vr1
+        # self.observation_space =  # TODO automatically generate from DOOM.GAME_VARS
+
+        self.step_i = None
+        self.start_ammo = None
+
+    def _get_state(self) -> GAME_STATE_T:
+        state = self.game.get_state()
+        self.step_i = state.number
+        game_vars = state.game_variables
+        game_state = DOOM.GAME_STATE_T(game_vars)
+        return game_state
 
     def step(self, action: ActType) -> Tuple[ObsType, float, bool, bool, dict]:
-        pass
+        step_start = time.time()
+
+        # action
+        move, shoot = action
+        move[:2] = move[:2] / self.tic_per_sec * self.map_unit_per_cm
+        move[2] = move[2] * self.map_degree_per_rad
+        reward = self.game.make_action(move.tolist() + [shoot], self.cfg['skiprate'])
+
+        # get state
+        state = self._get_state()
+
+        step_over = time.time()
+        print(f'one step took {(step_over - step_start) * 1000:.2f} ms')
+
+        finished = self.game.is_episode_finished()
+        return state, reward, state.dead, finished and not state.dead, {'i': self.step_i}
 
     def render(self) -> Optional[Union[RenderFrame, List[RenderFrame]]]:
         pass
 
     def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[ObsType, dict]:
-        # TODO before
+        # launch new episode
         self.game.new_episode()
-        # TODO
+
+        # send commands after episodes launches
+        self.game.make_action([0, 0, 0, 0], self.cfg['skiprate'])
+        self.game.send_game_command('fov 120')
+        self.game.send_game_command('vid_setmode 3440 1440')
+
+        state = self._get_state()
+        return state, {'i': self.step_i}  # initial state
 
     def close(self):
-        pass
+        self.game.close()
+
+
+if __name__ == '__main__':
+    DOOM('', 0)

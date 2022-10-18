@@ -43,8 +43,8 @@ class OmniDrive:
         self.pwm_to_motion_p = np.stack([np.ones(OmniDrive.AXES), np.zeros(OmniDrive.AXES)], axis=1)  # lin fun
         self.pwm_to_motion_scaler = np.ones(OmniDrive.AXES)  # scaler to translate motion/sec; no bias like above here
 
-        self.motion_per_rad = 0  # amount of motion detected for 1 rad turn
-        self.motion_per_cm = 0  # same but in cms (measured only for turn, but should generalize)
+        self.motion_per_rad = 0.  # amount of motion detected for 1 rad turn
+        self.motion_per_cm = 0.  # same but in cms (measured only for turn, but should generalize)
         self.drive_2_game_vel = [None, None, None]  # for each axis
         self.drive_2_game_acc = [None, None, None]  # how drive speed translates to in-game acceleration
 
