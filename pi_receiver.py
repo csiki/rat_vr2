@@ -83,9 +83,9 @@ def main():
 
                 def _unwrap_arg(a):
                     if isinstance(a, pi_wrapper.PiOverSocket):
-                        return device_objs[device_cls_names.index(type(a).__base__.__name__)][a.wrap_id]
+                        return device_objs[device_cls_names.index(type(a).__base__.__name__)][a._wrap_id]
                     elif isinstance(a, pi_wrapper.PiCallback):
-                        device_callback_functions[a.wrap_id] = a  # just keep track of callbacks
+                        device_callback_functions[a._wrap_id] = a  # just keep track of callbacks
                         return a
                     return a
 
@@ -102,8 +102,8 @@ def main():
                     ret_val = getattr(device_objs[device_cls_i][cmd['o']], cmd['f'])(*args, **kwargs)
 
                 # add callbacks function ids to return if has run
-                callback_ids_to_run = [cb.wrap_id for cb in device_callback_functions.values() if cb.called]
-                device_callback_functions = {wid: cb for wid, cb in device_callback_functions.items() if not cb.called}
+                callback_ids_to_run = [cb._wrap_id for cb in device_callback_functions.values() if cb._called]
+                device_callback_functions = {wid: cb for wid, cb in device_callback_functions.items() if not cb._called}
 
             except Exception as e:
                 exception = Exception(str(e) + ' at:\n' + str(traceback.format_exc()))

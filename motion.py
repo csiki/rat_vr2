@@ -14,7 +14,7 @@ else:  # testing
 
 
 class MotionSensor:  # on-ball movement tracking
-    def __init__(self, spi_port, spi_cs, spi_slot, sensor_class=PAA5100, invert_x=True, invert_y=False, swap_xy=True):
+    def __init__(self, spi_port, spi_cs, spi_slot, sensor_class=PAA5100, invert_x=False, invert_y=False, swap_xy=False):
         # spi_port=0, spi_slot='front' for the front sensor
         spi_cs_gpio = [7, 16]  # spi0 and spi1
 
@@ -45,10 +45,10 @@ class MotionSensor:  # on-ball movement tracking
             pass  # timed out waiting for motion data
 
     def get_rel_motion(self, get_dt=False):
-        rel_mot = np.array([self.rel_x, self.rel_y])
+        rel_mot = np.array([self.rel_x, self.rel_y], dtype=np.float32)
         self._reset_rel_next_iter = True
 
-        dt = self._last_rec - self._last_rel_t
+        dt = np.float32(self._last_rec - self._last_rel_t)
         # self._last_rel_t = time.time()
 
         if get_dt:
@@ -56,7 +56,7 @@ class MotionSensor:  # on-ball movement tracking
         return rel_mot
 
     def get_abs_motion(self):
-        return np.array([self.abs_x, self.abs_y])
+        return np.array([self.abs_x, self.abs_y], dtype=np.float32)
 
     def get_vel(self):
         rel_mot, dt = self.get_rel_motion(get_dt=True)
@@ -66,7 +66,7 @@ class MotionSensor:  # on-ball movement tracking
 class MotionSensors:  # 3 degrees of freedom
 
     # front, then side sensor mapping; first int is motion axis index of a sensor, second is the 3 DoF axis index
-    DEFAULT_AXIS_MAPPING = [((0, 0), (1, 2)), ((0, 1), (1, 2))]  # TODO test
+    DEFAULT_AXIS_MAPPING = [((0, 0), (1, 2)), ((0, 1), (1, 2))]
 
     def __init__(self, front_flo: MotionSensor, side_flo: MotionSensor,
                  axis_mapping: List[Tuple[Tuple[int, int], Tuple[int, int]]] = DEFAULT_AXIS_MAPPING):
@@ -88,7 +88,7 @@ class MotionSensors:  # 3 degrees of freedom
             for _from, _to in amap:
                 xyz[_to].append(rec[_from])
 
-        combined = np.array([np.mean(d) for d in xyz])
+        combined = np.array([np.mean(d) for d in xyz], dtype=np.float32)
         if get_dt:
             return combined, np.mean(dts)
         return combined

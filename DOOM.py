@@ -34,6 +34,8 @@ class DOOM(gym.Env):
         'max_player_speed': 500,  # cm/s; rat max is 500
     }
 
+    # variable naming: https://github.com/mwydmuch/ViZDoom/issues/210
+    #
     GAME_VARS = [
         GameVariable.POSITION_X, GameVariable.POSITION_Y, GameVariable.ANGLE,
         GameVariable.VELOCITY_X, GameVariable.VELOCITY_Y,

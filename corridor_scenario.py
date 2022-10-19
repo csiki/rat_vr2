@@ -1,5 +1,7 @@
 import socket
 import time
+import traceback
+import numpy as np
 
 from DOOM import DOOM
 from motion import MotionSensor, MotionSensors, SmoothMotion
@@ -19,28 +21,44 @@ with ServerSocket(host, port) as conn:
     # setup VR
     flo1 = PiMotionSensor(conn, 0, 1, 0, invert_x=True, invert_y=True, swap_xy=True)
     flo2 = PiMotionSensor(conn, 1, 0, 1, invert_x=False, invert_y=True, swap_xy=True)
-    smooth_flo1 = PiSmoothMotion(conn, flo1, 0.1)
-    smooth_flo2 = PiSmoothMotion(conn, flo2, 0.1)
     flo = PiMotionSensors(conn, flo1, flo2)
     smooth_flo = PiSmoothMotion(conn, flo, 0.1)
 
+    pm = PlayerMovement(do_calc_acc=True)
+
+    lin_act_pins = {'up': 22, 'down': 4, 'enable': 27}
+    roller0_pins = {'right': 23, 'left': 24, 'pwm': 18}
+    roller1_pins = {'right': 5, 'left': 6, 'pwm': 13}
+    roller2_pins = {'right': 25, 'left': 26, 'pwm': 12}
+    roller_pins = [roller0_pins, roller1_pins, roller2_pins]
+    od = PiOmniDrive(conn, roller_pins, lin_act_pins, mount_tracking=True)  # TODO calibration first, then pass it in here
+    assert od.motion_per_cm is not None and od.motion_per_rad is not None
+
+    # todo lever, reward
+
     # setup game
-    # doom = DOOM('../rat_vr/doom/scenarios/corridor_straight.wad', 'map01')
+    doom = DOOM('../rat_vr/doom/scenarios/corridor_straight.wad', 'map01')
     game_over = False
 
     while not game_over:
 
-        # get action
+        # run VR devices
+        od.loop()
         flo.loop()
-        print('-'*80)
-        print('flo1', flo1.get_vel(), '- smooth -> ', smooth_flo1.get_vel())
-        print('flo2', flo2.get_vel(), '- smooth -> ', smooth_flo2.get_vel())
-        print('comb', flo.get_vel(), '- smooth -> ', smooth_flo.get_vel())
-        # print('- smooth -> ', smooth_flo.get_vel())
-        time.sleep(.5)
 
+        # action
+        movement = smooth_flo.get_vel()
+        movement[:2] /= od.motion_per_cm
+        movement[2] /= od.motion_per_rad
+        action = (movement, 0)  # TODO lever
 
+        # step
+        state, reward, terminated, truncated, info = doom.step(action)
+        game_over = terminated or truncated
+        pm.loop(pos=np.array([state.position_x, state.position_y]), vel=np.array([state.velocity_x, state.velocity_y]))
 
-        # state, reward, terminated, truncated, info = doom.step(a)
-        # game_over = terminated or truncated
+        # TODO process state
+        # TODO dispense reward
+        # TODO train rat
 
+    # cleanup happens on device
