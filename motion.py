@@ -7,18 +7,19 @@ from collections import deque
 from importlib.util import find_spec
 
 if find_spec('pmw3901'):
-    from pmw3901 import PMW3901, PAA5100, BG_CS_FRONT_BCM, BG_CS_BACK_BCM
+    from pmw3901 import PMW3901, PAA5100
 else:  # testing
-    PMW3901 = PAA5100 = BG_CS_FRONT_BCM = BG_CS_BACK_BCM = None
+    PMW3901 = PAA5100 = None
     print('pmw3901 NOT FOUND')
 
 
 class MotionSensor:  # on-ball movement tracking
-    def __init__(self, spi_port, spi_slot, sensor_class=PAA5100):
+    def __init__(self, spi_port, spi_cs, spi_slot, sensor_class=PAA5100, invert_x=True, invert_y=False, swap_xy=True):
         # spi_port=0, spi_slot='front' for the front sensor
-        self.sensor = sensor_class(spi_port=spi_port, spi_cs=1,
-                                   spi_cs_gpio=BG_CS_FRONT_BCM if spi_slot == 'front' else BG_CS_BACK_BCM)
-        self.sensor.set_orientation(invert_x=True, invert_y=False, swap_xy=False)
+        spi_cs_gpio = [7, 16]  # spi0 and spi1
+
+        self.sensor = sensor_class(spi_port=spi_port, spi_cs=spi_cs, spi_cs_gpio=spi_cs_gpio[spi_slot])
+        self.sensor.set_orientation(invert_x=invert_x, invert_y=invert_y, swap_xy=swap_xy)
 
         self._last_rel_t, self._last_rec = time.time(), 0
         self.rel_x, self.rel_y = 0, 0
@@ -47,7 +48,6 @@ class MotionSensor:  # on-ball movement tracking
         rel_mot = np.array([self.rel_x, self.rel_y])
         self._reset_rel_next_iter = True
 
-        print('dt:', self._last_rec, self._last_rel_t)
         dt = self._last_rec - self._last_rel_t
         # self._last_rel_t = time.time()
 
@@ -58,7 +58,7 @@ class MotionSensor:  # on-ball movement tracking
     def get_abs_motion(self):
         return np.array([self.abs_x, self.abs_y])
 
-    def get_vel(self, reset=True):
+    def get_vel(self):
         rel_mot, dt = self.get_rel_motion(get_dt=True)
         return rel_mot / dt
 
@@ -78,27 +78,34 @@ class MotionSensors:  # 3 degrees of freedom
         self.front_flo.loop()
         self.side_flo.loop()
 
-    def _combine_sensor_rec(self, recs):
+    def _combine_sensor_rec(self, recs, get_dt):
         # axis mapping be like [((0, 0), (1, 1)), ((0, 1), (1, 2))]
+        dts = [r[1] for r in recs if get_dt]
+        recs = [(r[0] if get_dt else r) for r in recs]
+
         xyz = [[], [], []]  # gather motion recording for each axis, then mean when sensors have axis overlap
         for rec, amap in zip(recs, self.axis_mapping):
             for _from, _to in amap:
                 xyz[_to].append(rec[_from])
-        return np.mean(xyz, axis=1)
+
+        combined = np.array([np.mean(d) for d in xyz])
+        if get_dt:
+            return combined, np.mean(dts)
+        return combined
 
     def get_rel_motion(self, get_dt=False):
         rel_mots = [self.front_flo.get_rel_motion(get_dt), self.side_flo.get_rel_motion(get_dt)]
-        xyz = self._combine_sensor_rec(rel_mots)
+        xyz = self._combine_sensor_rec(rel_mots, get_dt)
         return xyz
 
     def get_abs_motion(self):
         abs_mots = [self.front_flo.get_abs_motion(), self.side_flo.get_abs_motion()]
-        xyz = self._combine_sensor_rec(abs_mots)
+        xyz = self._combine_sensor_rec(abs_mots, get_dt=False)
         return xyz
 
     def get_vel(self):
         vels = [self.front_flo.get_vel(), self.side_flo.get_vel()]
-        xyz = self._combine_sensor_rec(vels)
+        xyz = self._combine_sensor_rec(vels, get_dt=False)
         return xyz
 
 
@@ -113,7 +120,7 @@ class SmoothMotion:  # MotionSensor wrapper
         def _smoothing(dts):
             # windowing of previous pos recordings to compute vel or acc
             # in the time window given, weights recordings with longer dt higher; same as in player movement
-            past = np.cumsum(dts[::-1])[::-1]  # 10, 7, 5, 2, 1
+            past = np.cumsum(np.abs(dts[::-1]))[::-1]  # 10, 7, 5, 2, 1
             within_t = past - smooth_dt  # smooth_dt = 6; 4, 1, -1, -4, -5
             t_occupied = np.clip(dts - within_t, 0, None)  # 0, 1, 4, 5, 6
             t_occupied = np.min([t_occupied, dts], axis=0)  # 0, 1, 3, 1, 1
@@ -135,10 +142,11 @@ class SmoothMotion:  # MotionSensor wrapper
         # in the time window given, weights recordings with longer dt higher
         smooth_rel_mot = (rel_mots * self.smoothing(dts)[:, None]).sum(axis=0)
 
-        while sum(self._dts) > self.smooth_dt * 4:  # have some cushion
+        while np.abs(self._dts).sum() > self.smooth_dt * 4:  # have some cushion
             self._rel_mots.popleft()
             self._dts.popleft()
 
+        smooth_rel_mot[np.isnan(smooth_rel_mot)] = 0.
         return smooth_rel_mot.astype(np.float32)
 
 
@@ -146,7 +154,7 @@ def _main():  # example code with OmniDrive
 
     from omni_drive import OmniDrive
 
-    flo = MotionSensor(0, 'front')
+    flo = MotionSensor(0, 1, 0)
 
     lin_act_pins = {'up': 22, 'down': 4, 'enable': 27}
     roller0_pins = {'right': 23, 'left': 24, 'pwm': 18}

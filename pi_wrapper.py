@@ -145,8 +145,35 @@ class PiFeedback(Feedback, PiOverSocket):
         self.real_id = getattr(self, '__init__')(*args, **kwargs)
 
 
-if __name__ == '__main__':
+class ServerSocket:
+    def __init__(self, host, port):
+        self.host = host
+        self.port = port
+        self.sock: socket.socket = None
+        self.conn: socket.socket = None
+        self.conn_addr = None
 
+    def __enter__(self):
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        self.sock.bind((self.host, self.port))
+        self.sock.listen()
+
+        print(f'Accepting connections on {self.host}:{self.port}')
+        self.conn, self.conn_addr = self.sock.accept()
+        self.conn.settimeout(10)  # waiting on blocking calls
+        self.conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
+        return self.conn
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.conn:
+            self.conn.close()
+        if self.sock:
+            self.sock.close()
+
+
+def test_wrapper():
     # pc/server address
     host, port = '192.168.0.129', 4444  # '127.0.0.1'
 
@@ -157,42 +184,46 @@ if __name__ == '__main__':
     roller2_pins = {'right': 25, 'left': 26, 'pwm': 12}
     roller_pins = [roller0_pins, roller1_pins, roller2_pins]
 
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        sock.bind((host, port))
-        sock.listen()
+    with ServerSocket(host, port) as conn:
 
-        print('Accepting connections..')
-        conn, addr = sock.accept()
-        conn.settimeout(10)  # waiting on blocking calls
-        conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        p = PiMotionSensor(conn, 0, 1, 0)
+        ps = PiSmoothMotion(conn, p, 0.1)
 
-        with conn:
-            print(f"Connected by {addr}")
-            p = PiMotionSensor(conn, 0, 'front')
-            ps = PiSmoothMotion(conn, p, 0.1)
-            od = PiOmniDrive(conn, roller_pins, lin_act_pins)
-            od.setup()
+        p2 = PiMotionSensor(conn, 1, 0, 1)
+        ps2 = PiSmoothMotion(conn, p2, 0.1)
+        od = PiOmniDrive(conn, roller_pins, lin_act_pins)
+        od.setup()
 
-            last_od = time.time()
-            forward = True
-            loop_delay = .8
-            loop_times = []
+        last_od = time.time()
+        forward = True
+        loop_delay = .5
+        loop_times = []
 
-            for i in range(200):
-                loop_start = time.time()
+        for i in range(200):
+            loop_start = time.time()
 
-                if time.time() - last_od > 5:
-                    od.simple_drive('forward' if forward else 'backward', .7, t=1.5,
-                                    callback=lambda: od.simple_drive('right_turn', .7, t=2))
-                    forward = not forward
-                    last_od = time.time()
+            if time.time() - last_od > 6:
+                # od.simple_drive('right_turn' if forward else 'left_turn', .7, t=4)
+                od.simple_drive('forward' if forward else 'backward', .7, t=2.,
+                                callback=lambda: od.simple_drive('right_turn', .7, t=2))
+                forward = not forward
+                last_od = time.time()
 
-                p.loop()
-                od.loop()
-                # print(p.get_vel(), '- smooth -> ', ps.get_vel())
-                loop_times.append(time.time() - loop_start)
-                time.sleep(loop_delay)
+            p.loop()
+            p2.loop()
 
-            print('avg loop time:', np.mean(loop_times), np.std(loop_times))
-            print(loop_times)
+            od.loop()
+            print('-' * 80)
+
+            print(p.get_vel(), '- smooth -> ', ps.get_vel())
+            print(p2.get_vel(), '- smooth -> ', ps2.get_vel())
+
+            loop_times.append(time.time() - loop_start)
+            time.sleep(loop_delay)
+
+        print('avg loop time:', np.mean(loop_times), np.std(loop_times))
+        print(loop_times)
+
+
+if __name__ == '__main__':
+    test_wrapper()

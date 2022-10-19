@@ -123,7 +123,7 @@ class DOOM(gym.Env):
         state = self.game.get_state()
         self.step_i = state.number
         game_vars = state.game_variables
-        game_state = DOOM.GAME_STATE_T(game_vars)
+        game_state = DOOM.GAME_STATE_T(*game_vars)
         return game_state
 
     def step(self, action: ActType) -> Tuple[ObsType, float, bool, bool, dict]:
@@ -139,10 +139,11 @@ class DOOM(gym.Env):
         state = self._get_state()
 
         step_over = time.time()
-        print(f'one step took {(step_over - step_start) * 1000:.2f} ms')
+        # print(f'one step took {(step_over - step_start) * 1000:.2f} ms')
 
         finished = self.game.is_episode_finished()
-        return state, reward, state.dead, finished and not state.dead, {'i': self.step_i}
+        return state, reward, state.dead, finished and not state.dead, {'i': self.step_i,
+                                                                        'step_t': (step_over - step_start) * 1000}
 
     def render(self) -> Optional[Union[RenderFrame, List[RenderFrame]]]:
         pass
@@ -163,5 +164,22 @@ class DOOM(gym.Env):
         self.game.close()
 
 
+def doom_test():
+    doom = DOOM('../rat_vr/doom/scenarios/corridor_straight.wad', 'map01')
+    game_over = False
+    step_times = []
+    step_i = 0
+
+    while not game_over and not step_i > 300:
+        a = doom.action_space.sample()
+        state, reward, terminated, truncated, info = doom.step(a)
+
+        step_i = info['i']
+        step_times.append(info['step_t'])
+        game_over = terminated or truncated
+
+    print(f'Avg step times: {np.mean(step_times):.2f} ({np.std(step_times):.2f}) ms')
+
+
 if __name__ == '__main__':
-    DOOM('', 0)
+    doom_test()

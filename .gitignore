@@ -3,3 +3,4 @@ venv/
 tmp/
 tmp.py
 __pycache__/
+_vizdoom.ini
