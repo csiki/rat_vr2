@@ -43,9 +43,10 @@ class LinActuator:
     def loop(self):
         self.scheduler.run(blocking=False)
 
-    def cleanup(self):
+    def cleanup(self, gpio_cleanup=True):
         self.stop()
-        GPIO.cleanup()
+        if gpio_cleanup:
+            GPIO.cleanup()
         print('LinActuator cleanup done')
 
 

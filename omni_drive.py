@@ -294,7 +294,7 @@ class OmniDrive:
 
     def cleanup(self):
         self.stop(unmount=self.mount_tracking)
-        self.lin_act.cleanup()
+        self.lin_act.cleanup(gpio_cleanup=False)
         GPIO.cleanup()
         print('OmniDrive cleanup done')
 
@@ -675,6 +675,7 @@ def man_drive(speed):
 
         def _press(self, key):
             if key in self.key_mapping:
+                print('DRIVE..', end='', flush=True)
                 self.current_dir += omni_drive.simple_dirs_v[self.key_mapping[key]]
                 wheel_dir, wheel_dc = omni_drive.calc_wheel_v(self.current_dir * speed)
                 omni_drive.drive(wheel_dir, wheel_dc)
@@ -686,7 +687,7 @@ def man_drive(speed):
                     wheel_dir, wheel_dc = omni_drive.calc_wheel_v(self.current_dir * speed)
                     omni_drive.drive(wheel_dir, wheel_dc)
                 else:
-                    print('STOP')
+                    print('STOP', end='\n')
                     omni_drive.stop()
 
         def __init__(self):

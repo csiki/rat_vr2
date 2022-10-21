@@ -212,5 +212,37 @@ def test_wrapper():
         print(loop_times)
 
 
+def just_read_motion():
+    # pc/server address
+    host, port = '192.168.0.129', 4444  # '127.0.0.1'
+    print_delay = .8
+
+    with ServerSocket(host, port) as conn:
+        flo1 = PiMotionSensor(conn, 0, 1, 0, invert_x=True, invert_y=True, swap_xy=True)
+        flo2 = PiMotionSensor(conn, 1, 0, 1, invert_x=False, invert_y=True, swap_xy=True)
+        flo = PiMotionSensors(conn, flo1, flo2)
+        smooth_flo = PiSmoothMotion(conn, flo, 0.1)
+
+        last_print = time.time()
+        ts = []
+
+        while True:
+            s = time.time()
+
+            smooth_flo.loop()
+            if time.time() - last_print > print_delay:
+                print('-' * 80)
+                # print('1', flo1.get_vel())
+                # print('2', flo2.get_vel())
+                print('c', smooth_flo.get_vel())
+                last_print = time.time()
+            # time.sleep(0.01)
+
+            ts.append(time.time() - s)
+            if len(ts) % 200 == 0:
+                print('T:', np.mean(ts))
+
+
 if __name__ == '__main__':
-    test_wrapper()
+    # test_wrapper()
+    just_read_motion()

@@ -13,7 +13,7 @@ from omni_drive import OmniDrive
 from actuator import LinActuator
 from player_movement import PlayerMovement, Feedback
 import pi_wrapper
-from pi_wrapper import PiSmoothMotion, PiMotionSensor, PiOverSocket, PiCallback
+from pi_wrapper import PiSmoothMotion, PiMotionSensor, PiOverSocket, PiCallback, PiMotionSensors
 
 
 # run loop, parse pc messages over network and call corresponding wrapped functions
@@ -33,7 +33,7 @@ from pi_wrapper import PiSmoothMotion, PiMotionSensor, PiOverSocket, PiCallback
 def main():
 
     # remote pc/server address
-    server_host, server_port = sys.argv[1], 4444
+    server_host, server_port = sys.argv[1], int(sys.argv[2]) if len(sys.argv) > 2 else 4444
 
     # devices  # TODO add lever, reward, trainer
     device_clss = [MotionSensor, MotionSensors, SmoothMotion, OmniDrive, LinActuator, PlayerMovement, Feedback]

@@ -133,7 +133,7 @@ class DOOM(gym.Env):
 
         # action
         move, shoot = action
-        move[:2] = move[:2] / self.tic_per_sec * self.map_unit_per_cm
+        move[:2] = move[:2] / self.tic_per_sec * self.map_unit_per_cm  # todo * self.cfg['skiprate'] ?
         move[2] = move[2] * self.map_degree_per_rad
         reward = self.game.make_action(move.tolist() + [shoot], self.cfg['skiprate'])
 

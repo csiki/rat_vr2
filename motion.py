@@ -35,8 +35,9 @@ class MotionSensor:  # on-ball movement tracking
 
         # store motion information
         try:
-            self._last_rec = time.time()
+
             x, y = self.sensor.get_motion(timeout=0.001)
+            self._last_rec = time.time()  # FIXME moved it here; is this fine? still not accurate enough - maybe the limitation of the sensor
             self.rel_x += x
             self.rel_y += y
             self.abs_x += x
@@ -129,17 +130,22 @@ class SmoothMotion:  # MotionSensor wrapper
 
         self.smoothing = _smoothing
 
-    def get_vel(self):
-        # computes velocity over time by weighting velocities in the given past window by their dt,
-        # that is, velocities that were present for longer are weighted higher in the mean
+    def loop(self):
+        self.flo.loop()
+        # record motion at each loop
         rel_mot, dt = self.flo.get_rel_motion(get_dt=True)
         self._rel_mots.append(rel_mot)
         self._dts.append(dt)
 
+    def get_vel(self):
+        # computes velocity over time by weighting velocities in the given past window by their dt,
+        # that is, velocities that were present for longer are weighted higher in the mean
         rel_mots = np.asarray(self._rel_mots)  # (time, axes)
         dts = np.asarray(self._dts)  # example: 3, 2, 3, 1, 1
+        print(dts.shape)
 
         # in the time window given, weights recordings with longer dt higher
+        print(np.concatenate([dts[..., None], rel_mots], axis=1))
         smooth_rel_mot = (rel_mots * self.smoothing(dts)[:, None]).sum(axis=0)
 
         while np.abs(self._dts).sum() > self.smooth_dt * 4:  # have some cushion
