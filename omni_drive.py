@@ -21,17 +21,23 @@ else:
 from actuator import LinActuator
 from motion import MotionSensor, MotionSensors
 from player_movement import PlayerMovement, Feedback
+from config import *
 
 
 class OmniDrive:
+    LIN_ACT_PINS = {'up': 22, 'down': 4, 'enable': 27}
+    ROLLER0_PINS = {'right': 23, 'left': 24, 'pwm': 18}
+    ROLLER1_PINS = {'right': 5, 'left': 6, 'pwm': 13}
+    ROLLER2_PINS = {'right': 25, 'left': 26, 'pwm': 12}
+    ROLLER_PINS = [ROLLER0_PINS, ROLLER1_PINS, ROLLER2_PINS]
 
     # FB_FUN_TYPE =
     PIDp = namedtuple('PIDp', ['Kp', 'Ki', 'Kd'])
     AXES = 3  # forward/backward, left/right strafe, left/right turn
     PWM_2_MOTION_FUN = lambda x, *p: x * p[0] + p[1]  # uses pwm_to_motion_p params for each axis
 
-    def __init__(self, roller_pins, lin_act_pins, up_trans_t=4, down_trans_t=4, mount_tracking=False,
-                 pwm_freq=1000, calib_path=None):
+    def __init__(self, roller_pins=ROLLER_PINS, lin_act_pins=LIN_ACT_PINS, up_trans_t=4, down_trans_t=4,
+                 mount_tracking=False, pwm_freq=1000, calib_path=None):
 
         self.roller_dirs = np.array(['left', 'right'])
         self.simple_dirs_v = {'forward': [1., 0., 0.], 'backward': [-1., 0., 0.],  # v, vn, w
@@ -302,10 +308,12 @@ class OmniDrive:
         import torch
         import omni_transfer_opt
 
-        flo = MotionSensor(0, 'front')
+        flo1 = MotionSensor(**FRONT_MOTION_PARAMS)
+        flo2 = MotionSensor(**SIDE_MOTION_PARAMS)
+        flo = MotionSensors(flo1, flo2)
         drive_t = 5
         niter = 50
-        dirs_to_try = ['forward', 'backward', 'left_turn', 'right_turn']  # TODO try strafe l/r w/ other motion sensor (use MotionSensorS class)
+        dirs_to_try = ['forward', 'backward', 'left_strafe', 'right_strafe', 'left_turn', 'right_turn']
 
         # setup nn
         trans = omni_transfer_opt.OmniTransferOpt(self.def_d)
@@ -332,7 +340,6 @@ class OmniDrive:
 
                 motion = flo.get_rel_motion()
                 motion = motion / np.abs(motion).sum()
-                motion = [motion[0], 0, motion[1]]  # f/b and w, TODO 0 -> no strafe yet -> just rewrite this function w/ 3 DoF
                 actual_motion.append(motion)
 
             # evaluate model for expected motion
@@ -363,13 +370,16 @@ class OmniDrive:
         for dir_ in dirs_to_try:
             self.simple_drive(dir_, t=drive_t, blocking=True)
 
-    def calibrate_speed(self):  # calling this is not necessary, only sets pwm_to_motion_p
+    def calibrate_speed(self):  # sets pwm_to_motion_p and pwm_to_motion_scaler
         # try different speeds, compare with motion sensor recording,
         # establish drive velocity (motor pwm) to motion velocity function for each axis
         drive_t = 5  # s
         pwms_to_try = np.linspace(0.1, 1.0, 10)
-        dirs_to_try = ['forward', 'backward', 'left_turn', 'right_turn']  # TODO strafe -> just rewrite this function w/ 3 DoF
-        flo = MotionSensor(0, 'front')
+        dirs_to_try = ['forward', 'backward', 'left_strafe', 'right_strafe', 'left_turn', 'right_turn']
+
+        flo1 = MotionSensor(**FRONT_MOTION_PARAMS)
+        flo2 = MotionSensor(**SIDE_MOTION_PARAMS)
+        flo = MotionSensors(flo1, flo2)
 
         drive_vs = []
         motions = []
@@ -386,7 +396,6 @@ class OmniDrive:
                 flo.get_rel_motion()  # zero out rel vars
                 self.drive(wheel_dir, wheel_dc, t=drive_t, blocking=True)
                 motion = flo.get_rel_motion()
-                motion = [motion[0], 0, motion[1]]  # TODO add strafe -> just rewrite this function w/ 3 DoF
                 motions.append(motion)
 
         # establish pwm to motion velocity function for each axis
@@ -395,7 +404,7 @@ class OmniDrive:
         motions = np.abs(np.array(motions))  # same
         axes = np.argmax(np.abs(drive_vs), axis=1)
 
-        for axis in [0, 2]:  # TODO add strafe and [0, 1, 2] -> just rewrite this function w/ 3 DoF
+        for axis in [0, 1, 2]:
             dv = drive_vs[axes == axis, axis]  # pwms (see scaling above)
             mv = motions[axes == axis, axis] / drive_t  # motion/sec
             p0 = np.ones(2)
@@ -406,14 +415,16 @@ class OmniDrive:
 
             print(f'axis {axis}) popt: {popt.tolist()}')
 
-    def calibrate_full_rot(self, ball_r):  # TODO test
+    def calibrate_full_rot(self, ball_r):  # ball_r in cm TODO test
         # defines motion to angle (rad) transfer function
         print('Press the \'right\' key until a full rotation occurs; press \'left\' to correct; press Esc to finish')
 
         drive_v = .5
         nruns = 5
-        flo = MotionSensor(0, 'front')
-        # flo = MotionSensors(MotionSensor(0, 'front'), MotionSensor(1, 'back'))  # TODO MotionSensorS
+
+        flo1 = MotionSensor(**FRONT_MOTION_PARAMS)
+        flo2 = MotionSensor(**SIDE_MOTION_PARAMS)
+        flo = MotionSensors(flo1, flo2)
 
         def _press(key):
             if key == 'right':
@@ -625,16 +636,9 @@ def wheel_tests(omni_drive: OmniDrive):
     time.sleep(2)
 
 
-def _onmni_test():
-    calib_path = sys.argv[1] if len(sys.argv) > 1 else None
+def onmni_test(calibratopn_path=None):
 
-    lin_act_pins = {'up': 22, 'down': 4, 'enable': 27}
-    roller0_pins = {'right': 23, 'left': 24, 'pwm': 18}
-    roller1_pins = {'right': 5, 'left': 6, 'pwm': 13}
-    roller2_pins = {'right': 25, 'left': 26, 'pwm': 12}
-    roller_pins = [roller0_pins, roller1_pins, roller2_pins]
-
-    omni_drive = OmniDrive(roller_pins, lin_act_pins, up_trans_t=4, down_trans_t=4, pwm_freq=1000, calib_path=calib_path)
+    omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4, pwm_freq=1000, calib_path=calibratopn_path)
     omni_drive.setup()
 
     def exit_code(*args):
@@ -643,23 +647,14 @@ def _onmni_test():
 
     signal.signal(signal.SIGINT, exit_code)
 
-    # omni_drive.calibrate_transfer_fun2()
-
     # tests
     wheel_tests(omni_drive)
-
     omni_drive.cleanup()
 
 
 def man_drive(speed):
 
-    lin_act_pins = {'up': 22, 'down': 4, 'enable': 27}
-    roller0_pins = {'right': 23, 'left': 24, 'pwm': 18}
-    roller1_pins = {'right': 5, 'left': 6, 'pwm': 13}
-    roller2_pins = {'right': 25, 'left': 26, 'pwm': 12}
-    roller_pins = [roller0_pins, roller1_pins, roller2_pins]
-
-    omni_drive = OmniDrive(roller_pins, lin_act_pins, up_trans_t=4, down_trans_t=4, pwm_freq=1000)
+    omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4, pwm_freq=1000)
     omni_drive.setup()
 
     def exit_code(*args):
@@ -702,8 +697,44 @@ def man_drive(speed):
     omni_drive.cleanup()
 
 
+def calibrate(calibration_path, **calib_kwargs):  # TODO test
+    omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4, pwm_freq=1000)
+    omni_drive.setup()
+
+    def exit_code(*args):
+        omni_drive.cleanup()
+        exit(0)
+
+    signal.signal(signal.SIGINT, exit_code)
+
+    # calibrate
+    print('Calibrate transfer function')
+    omni_drive.calibrate_transfer_fun()
+    print('Calibrate speed')
+    omni_drive.calibrate_speed()
+    print('Calibrate full rotation')
+    omni_drive.calibrate_full_rot(ball_r=20)
+    # omni_drive.calibrate_game_movement()  # results of this step is not yet used + it needs game to run
+    print('Calibrate PID parameters')
+    omni_drive.calibrate_pid_params(calib_kwargs['cm_per_game_dist_unit'])
+
+    # save results
+    omni_drive.save(calibration_path)
+
+
 if __name__ == '__main__':
-    if len(sys.argv) > 1 and sys.argv[1] == 'man':
-        man_drive(float(sys.argv[2]) if len(sys.argv) > 2 else .7)
-    else:
-        _onmni_test()
+    # man args: speed
+    # calibrate args: calibration_path
+    # test args: calibration_path
+    function = sys.argv[1]  # must be 'man', 'calibrate' or 'test'
+    assert function in ['man', 'calibrate', 'test']
+
+    if function == 'man':
+        speed = float(sys.argv[2]) if len(sys.argv) > 2 else .7
+        man_drive(speed)
+    elif function == 'calibrate':
+        calibration_path = sys.argv[2]
+        calibrate(calibration_path)
+    elif function == 'test':
+        calibration_path = sys.argv[2] if len(sys.argv) > 2 else None
+        onmni_test(calibration_path)

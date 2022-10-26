@@ -8,6 +8,7 @@ from motion import MotionSensor, MotionSensors, SmoothMotion
 from actuator import LinActuator
 from omni_drive import OmniDrive
 from player_movement import PlayerMovement, Feedback
+from config import *
 
 from pi_wrapper import PiSmoothMotion, PiMotionSensor, PiMotionSensors, PiOmniDrive, PiFeedback, PiPlayerMovement, ServerSocket
 
@@ -19,25 +20,20 @@ host, port = '192.168.0.129', 4444  # '127.0.0.1'
 with ServerSocket(host, port) as conn:
 
     # setup VR
-    flo1 = PiMotionSensor(conn, 0, 1, 0, invert_x=True, invert_y=True, swap_xy=True)
-    flo2 = PiMotionSensor(conn, 1, 0, 1, invert_x=False, invert_y=True, swap_xy=True)
+    flo1 = PiMotionSensor(conn, **FRONT_MOTION_PARAMS)
+    flo2 = PiMotionSensor(conn, **SIDE_MOTION_PARAMS)
     flo = PiMotionSensors(conn, flo1, flo2)
     smooth_flo = PiSmoothMotion(conn, flo, 0.1)
 
     pm = PlayerMovement(do_calc_acc=True)
-
-    lin_act_pins = {'up': 22, 'down': 4, 'enable': 27}
-    roller0_pins = {'right': 23, 'left': 24, 'pwm': 18}
-    roller1_pins = {'right': 5, 'left': 6, 'pwm': 13}
-    roller2_pins = {'right': 25, 'left': 26, 'pwm': 12}
-    roller_pins = [roller0_pins, roller1_pins, roller2_pins]
-    od = PiOmniDrive(conn, roller_pins, lin_act_pins, mount_tracking=True)  # TODO calibration first, then pass it in here
+    calibration_path = ''  # TODO
+    od = PiOmniDrive(conn, mount_tracking=True, calib_path=calibration_path)
     assert od.motion_per_cm is not None and od.motion_per_rad is not None
 
     # todo lever, reward
 
     # setup game
-    doom = DOOM('../rat_vr/doom/scenarios/corridor_straight.wad', 'map01')
+    doom = DOOM('doom/scenarios/arena_lowered.wad', 'map01')
     game_over = False
 
     while not game_over:

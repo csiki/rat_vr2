@@ -167,7 +167,7 @@ class DOOM(gym.Env):
 
 
 def doom_test():
-    doom = DOOM('../rat_vr/doom/scenarios/corridor_straight.wad', 'map01')
+    doom = DOOM('doom/scenarios/arena_lowered.wad', 'map01')
     game_over = False
     step_times = []
     step_i = 0

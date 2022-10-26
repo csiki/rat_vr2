@@ -35,7 +35,6 @@ class MotionSensor:  # on-ball movement tracking
 
         # store motion information
         try:
-
             x, y = self.sensor.get_motion(timeout=0.001)
             self._last_rec = time.time()  # FIXME moved it here; is this fine? still not accurate enough - maybe the limitation of the sensor
             self.rel_x += x
