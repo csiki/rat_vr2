@@ -123,10 +123,15 @@ class DOOM(gym.Env):
 
     def _get_state(self) -> GAME_STATE_T:
         state = self.game.get_state()
-        self.step_i = state.number
-        game_vars = state.game_variables
-        game_state = DOOM.GAME_STATE_T(*game_vars)
-        return game_state
+        game_over = state is None
+        game_state = None
+
+        if not game_over:
+            self.step_i = state.number
+            game_vars = state.game_variables
+            game_state = DOOM.GAME_STATE_T(*game_vars)
+
+        return game_state, game_over
 
     def step(self, action: ActType) -> Tuple[ObsType, float, bool, bool, dict]:
         step_start = time.time()
@@ -138,14 +143,13 @@ class DOOM(gym.Env):
         reward = self.game.make_action(move.tolist() + [shoot], self.cfg['skiprate'])
 
         # get state
-        state = self._get_state()
+        state, game_over = self._get_state()
 
         step_over = time.time()
-        # print(f'one step took {(step_over - step_start) * 1000:.2f} ms')
 
         finished = self.game.is_episode_finished()
-        return state, reward, state.dead, finished and not state.dead, {'i': self.step_i,
-                                                                        'step_t': (step_over - step_start) * 1000}
+        return state, reward, state.dead, game_over or finished and not state.dead, {'i': self.step_i,
+                                                                                     'step_t': (step_over - step_start) * 1000}
 
     def render(self) -> Optional[Union[RenderFrame, List[RenderFrame]]]:
         pass

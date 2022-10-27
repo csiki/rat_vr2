@@ -8,8 +8,7 @@ class OmniTransferOpt(torch.nn.Module):
         self.tm = torch.tensor(
             [[-np.sin(np.pi / 3), np.cos(np.pi / 3), def_d],
              [0, -1, def_d],
-             [np.sin(np.pi / 3), np.cos(np.pi / 3), def_d]]
-        )
+             [np.sin(np.pi / 3), np.cos(np.pi / 3), def_d]], dtype=torch.float32)
         self.inv_tm_v = torch.nn.Parameter(torch.inverse(self.tm))
 
         # self.tm_lin = torch.nn.Linear(3, 3, bias=True)

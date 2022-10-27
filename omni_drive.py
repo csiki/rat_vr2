@@ -48,6 +48,10 @@ class OmniDrive:
         self.noise_floors = np.zeros(OmniDrive.AXES)  # noise/second; 3 axes
         self.pwm_to_motion_p = np.stack([np.ones(OmniDrive.AXES), np.zeros(OmniDrive.AXES)], axis=1)  # lin fun
         self.pwm_to_motion_scaler = np.ones(OmniDrive.AXES)  # scaler to translate motion/sec; no bias like above here
+        # TODO last calibration:
+        #   axis 0) popt: [7704.327051141399, -217.8399065554388]
+        #   axis 1) popt: [9066.412009890513, -1687.9866419798052]
+        #   axis 2) popt: [8536.199838574827, -628.5999509056599]
 
         self.motion_per_rad = None  # amount of motion detected for 1 rad turn
         self.motion_per_cm = None  # same but in cms (measured only for turn, but should generalize)
@@ -66,6 +70,11 @@ class OmniDrive:
              [0, -1, self.def_d],
              [np.sin(np.pi / 3), np.cos(np.pi / 3), self.def_d]]
         )
+        # TODO last calibration best:
+        self.trans_mx = np.array(
+            [[ 9.608279,    0.7030483,   0.19814108],
+             [-0.17366488, -1.2253994,   0.16833168],
+             [-9.72685,     0.5778875,   0.13894492]])
 
         self.roller_pins = roller_pins
         self.pwm_freq = pwm_freq
@@ -313,6 +322,7 @@ class OmniDrive:
         flo = MotionSensors(flo1, flo2)
         drive_t = 5
         niter = 50
+        speed = .8
         dirs_to_try = ['forward', 'backward', 'left_strafe', 'right_strafe', 'left_turn', 'right_turn']
 
         # setup nn
@@ -331,20 +341,23 @@ class OmniDrive:
             wheel_vs = []
 
             for dir_i, dir_ in enumerate(dirs_to_try):
-                drive_v = self.simple_dirs_v[dir_]
+
+                drive_v = self.simple_dirs_v[dir_] * speed
                 wheel_dir, wheel_dc, wheel_v, wheel_v_normed = self.calc_wheel_v(drive_v, ret_wheel_v=True)
                 wheel_vs.append(wheel_v)
 
+                flo.loop()
                 flo.get_rel_motion()  # zero out rel vars
                 self.drive(wheel_dir, wheel_dc, t=drive_t, blocking=True)
 
+                flo.loop()
                 motion = flo.get_rel_motion()
                 motion = motion / np.abs(motion).sum()
                 actual_motion.append(motion)
 
             # evaluate model for expected motion
-            actual_motion = torch.reshape(torch.tensor(actual_motion), (len(dirs_to_try), OmniDrive.AXES, 1))
-            wheel_vs = torch.reshape(torch.tensor(np.array(wheel_vs)), (len(dirs_to_try), 3, 1))
+            actual_motion = torch.reshape(torch.tensor(actual_motion, dtype=torch.float32), (len(dirs_to_try), OmniDrive.AXES, 1))
+            wheel_vs = torch.reshape(torch.tensor(np.array(wheel_vs), dtype=torch.float32), (len(dirs_to_try), 3, 1))
             expected_motion = trans(wheel_vs)
             err = loss(expected_motion, actual_motion)
             print(f'loss: {err.item():.3f}')
@@ -393,8 +406,11 @@ class OmniDrive:
                 wheel_dir, wheel_dc = self.calc_wheel_v(drive_v)
                 drive_vs.append(drive_v)
 
+                flo.loop()
                 flo.get_rel_motion()  # zero out rel vars
                 self.drive(wheel_dir, wheel_dc, t=drive_t, blocking=True)
+
+                flo.loop()
                 motion = flo.get_rel_motion()
                 motions.append(motion)
 
@@ -440,7 +456,7 @@ class OmniDrive:
 
         complete_turn = []
         for run in range(nruns):
-            print(f'{run + 1}/{nruns} round')
+            print(f'{run + 1}/{nruns} round: press right up to a full 360-degree turn')
             flo.get_rel_motion()  # reset rel motion
             sshkeyboard.listen_keyboard(
                 on_press=_press,
@@ -697,9 +713,10 @@ def man_drive(speed):
     omni_drive.cleanup()
 
 
-def calibrate(calibration_path, **calib_kwargs):  # TODO test
+def calibrate(calibration_path, **calib_kwargs):  # TODO argparsed input from main
     omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4, pwm_freq=1000)
     omni_drive.setup()
+    omni_drive.mount()
 
     def exit_code(*args):
         omni_drive.cleanup()
@@ -709,9 +726,9 @@ def calibrate(calibration_path, **calib_kwargs):  # TODO test
 
     # calibrate
     print('Calibrate transfer function')
-    omni_drive.calibrate_transfer_fun()
+    # omni_drive.calibrate_transfer_fun() # TODO
     print('Calibrate speed')
-    omni_drive.calibrate_speed()
+    # omni_drive.calibrate_speed() # TODO
     print('Calibrate full rotation')
     omni_drive.calibrate_full_rot(ball_r=20)
     # omni_drive.calibrate_game_movement()  # results of this step is not yet used + it needs game to run
@@ -722,9 +739,9 @@ def calibrate(calibration_path, **calib_kwargs):  # TODO test
     omni_drive.save(calibration_path)
 
 
-if __name__ == '__main__':
+def main():
     # man args: speed
-    # calibrate args: calibration_path
+    # calibrate args: calibration_path cm_per_game_dist_unit  # TODO argparse
     # test args: calibration_path
     function = sys.argv[1]  # must be 'man', 'calibrate' or 'test'
     assert function in ['man', 'calibrate', 'test']
@@ -734,7 +751,12 @@ if __name__ == '__main__':
         man_drive(speed)
     elif function == 'calibrate':
         calibration_path = sys.argv[2]
-        calibrate(calibration_path)
+        cm_per_game_dist_unit = float(sys.argv[3])
+        calibrate(calibration_path, cm_per_game_dist_unit=cm_per_game_dist_unit)
     elif function == 'test':
         calibration_path = sys.argv[2] if len(sys.argv) > 2 else None
         onmni_test(calibration_path)
+
+
+if __name__ == '__main__':
+    main()
