@@ -12,6 +12,7 @@ vizdoom
 
 RPi.GPIO
 pmw3901
+pyserial
 
 # setting up spi ports:
 #   sudo nano /boot/config.txt
