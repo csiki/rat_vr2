@@ -171,7 +171,7 @@ void printResponse() {
     Serial.print(blowrinterval);
     Serial.print("|TS:");
     Serial.print(turns);
-    Serial.print(" >>");
+    Serial.print("|P:");
     Serial.print(pressure);
     Serial.print(" kPa");
     Serial.println();

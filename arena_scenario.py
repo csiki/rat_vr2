@@ -10,7 +10,8 @@ from omni_drive import OmniDrive
 from player_movement import PlayerMovement, Feedback
 from config import *
 
-from pi_wrapper import PiSmoothMotion, PiMotionSensor, PiMotionSensors, PiOmniDrive, PiFeedback, PiPlayerMovement, ServerSocket
+from pi_wrapper import PiSmoothMotion, PiMotionSensor, PiMotionSensors, PiOmniDrive, PiFeedback, \
+    PiPlayerMovement, ServerSocket, PiRewardCircuit
 
 
 # pc/server address
@@ -26,11 +27,13 @@ with ServerSocket(host, port) as conn:
     smooth_flo = PiSmoothMotion(conn, flo, 0.1)
 
     pm = PlayerMovement(do_calc_acc=True)
+
     calibration_path = ''  # TODO
     od = PiOmniDrive(conn, mount_tracking=True, calib_path=calibration_path)
     assert od.motion_per_cm is not None and od.motion_per_rad is not None
 
-    # todo lever, reward
+    rew = PiRewardCircuit(conn, 'SERIAL_PORT_ON_PI')  # TODO serial port
+    # TODO lever
 
     # setup game
     doom = DOOM('doom/scenarios/arena_lowered.wad', 'map01')

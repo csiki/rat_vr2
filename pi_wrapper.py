@@ -12,6 +12,7 @@ from motion import MotionSensor, MotionSensors, SmoothMotion
 from actuator import LinActuator
 from omni_drive import OmniDrive
 from player_movement import PlayerMovement, Feedback
+from reward import RewardCircuit
 
 
 # wrap classes/functions present on the raspberry pi:
@@ -127,6 +128,12 @@ class PiPlayerMovement(PlayerMovement, PiOverSocket):
 
 
 class PiFeedback(Feedback, PiOverSocket):
+    def __init__(self, _conn_sock: socket.socket, *args, **kwargs):
+        PiOverSocket.__init__(self, _conn_sock, self.__class__.__base__)
+        self.real_id = getattr(self, '__init__')(*args, **kwargs)
+
+
+class PiRewardCircuit(RewardCircuit, PiOverSocket):
     def __init__(self, _conn_sock: socket.socket, *args, **kwargs):
         PiOverSocket.__init__(self, _conn_sock, self.__class__.__base__)
         self.real_id = getattr(self, '__init__')(*args, **kwargs)

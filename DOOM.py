@@ -41,14 +41,21 @@ class DOOM(gym.Env):
         GameVariable.VELOCITY_X, GameVariable.VELOCITY_Y,
         GameVariable.HEALTH, GameVariable.DAMAGE_TAKEN, GameVariable.DEAD,
         GameVariable.HITCOUNT, GameVariable.KILLCOUNT, GameVariable.FRAGCOUNT, GameVariable.ATTACK_READY,
-        GameVariable.ITEMCOUNT, GameVariable.USER1, GameVariable.USER2,
+        GameVariable.ITEMCOUNT, GameVariable.USER1, GameVariable.USER2, GameVariable.USER3, GameVariable.USER4,
+        GameVariable.USER5, GameVariable.USER6, GameVariable.USER7,
         GameVariable.AMMO0, GameVariable.AMMO1, GameVariable.AMMO2, GameVariable.AMMO3, GameVariable.AMMO4,
         GameVariable.AMMO5, GameVariable.AMMO6, GameVariable.AMMO7, GameVariable.AMMO8, GameVariable.AMMO9,
         GameVariable.SELECTED_WEAPON_AMMO
     ]
+    GAME_VAR_RENAMING = {GameVariable.USER1: 'kill_count', GameVariable.USER2: 'monsters_present',
+                         GameVariable.USER3: 'monster_pos_x', GameVariable.USER4: 'monster_pos_y',
+                         GameVariable.USER5: 'monsters_spawned', GameVariable.USER6: 'monsters_removed',
+                         GameVariable.USER7: 'wall_bump_angle'}
 
     # named tuple, with names derived by lower casing game var names
-    GAME_STATE_T = namedtuple('game_state_t', [str(v)[str(v).find('.') + 1:].lower() for v in GAME_VARS])
+    # use GAME_VAR_RENAMING if possible
+    GAME_STATE_T = namedtuple('game_state_t', [GAME_VAR_RENAMING.get(v, str(v)[str(v).find('.') + 1:].lower())
+                                               for v in GAME_VARS])
 
     def __init__(self, wad_path, map_id, cfg=DEFAULT_CFG):
         super().__init__()
@@ -109,14 +116,14 @@ class DOOM(gym.Env):
         #   max speed originally is 30 mu/tic
         self.tic_per_sec = 35.
         self.map_unit_per_cm = 8. / 30.48
-        self.map_degree_per_rad = 180. / np.pi
+        self.map_degree_per_rad = 0.5 / np.pi  # game degree in [0, 1]
         move_speed_rng = cfg['max_player_speed'] / self.tic_per_sec * self.map_unit_per_cm  # map_unit / tic
-        move_turn_rng = np.pi * self.map_degree_per_rad  # game degree per radian (1 or 180)
+        move_turn_rng = np.pi * self.map_degree_per_rad
         move_space = gym.spaces.Box(low=np.array([-move_speed_rng, -move_speed_rng, -move_turn_rng]),
                                     high=np.array([move_speed_rng, move_speed_rng, move_turn_rng]))
         shoot_space = gym.spaces.Discrete(2)  # shoot or no
         self.action_space = gym.spaces.Tuple([move_space, shoot_space])
-        # self.observation_space =  # TODO automatically generate from DOOM.GAME_VARS
+        self.observation_space = gym.spaces.Discrete(2)  # not really used, just here for gym's sake for now
 
         self.step_i = None
         self.start_ammo = None
@@ -146,6 +153,8 @@ class DOOM(gym.Env):
         state, game_over = self._get_state()
 
         step_over = time.time()
+
+        # TODO return wall bumping situation - calculate the players angle at the wall when bumped - use state.wall_bump_angle
 
         finished = self.game.is_episode_finished()
         return state, reward, state.dead, game_over or finished and not state.dead, {'i': self.step_i,
