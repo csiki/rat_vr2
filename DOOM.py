@@ -155,6 +155,7 @@ class DOOM(gym.Env):
         step_over = time.time()
 
         # TODO return wall bumping situation - calculate the players angle at the wall when bumped - use state.wall_bump_angle
+        # TODO should save the state of the acs script: have inverse gitignore in doom/scenarios, or just in the root
 
         finished = self.game.is_episode_finished()
         return state, reward, state.dead, game_over or finished and not state.dead, {'i': self.step_i,

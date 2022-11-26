@@ -1,10 +1,12 @@
 import socket
+import subprocess
 import types
 import inspect
 import time
 import pickle
 import sched
 from typing import Callable, Any, Union, Tuple
+from pathlib import Path
 
 import numpy as np
 
@@ -15,8 +17,8 @@ from player_movement import PlayerMovement, Feedback
 from reward import RewardCircuit
 
 
-# wrap classes/functions present on the raspberry pi:
-#   omni drive, motion sensors, reward (feeder, air puffs), ultrasound, lever, (speakers)
+# wrap classes/functions for objects present on the raspberry pi:
+#   omni drive, motion sensors, reward (feeder, air puffs), ultrasound, lever, audio
 
 class PiCallback(Callable):
     def __init__(self, f: Callable):
@@ -139,6 +141,30 @@ class PiRewardCircuit(RewardCircuit, PiOverSocket):
         self.real_id = getattr(self, '__init__')(*args, **kwargs)
 
 
+class Win2PiAudio:
+    # from: https://raspberrypi.stackexchange.com/a/11744/149645
+
+    def __init__(self, pi_ip, pi_user='rpdpi', pi_pass='666666', linco_path=''):
+        self.pi_ip = pi_ip
+        self.pi_user = pi_user
+        self.pi_pass = pi_pass  # i know, change the default if you are scared
+        self.linco_path = Path(linco_path)  # leave default if linco.exe is added to the Path environment var
+        self.proc = None
+
+    def start(self):
+        cmd = [str(self.linco_path / 'linco.exe'), '-B', '16', '-C', '2', '-R', '44100',
+               '|', 'plink', self.pi_ip, '-l', self.pi_user, '-pw', self.pi_pass,
+               'cat - | pacat --server 127.0.0.1 --playback']
+        print('run:', ' '.join(cmd))
+        self.proc = subprocess.Popen(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
+
+    def is_running(self):
+        return self.proc.poll() is None if self.proc else False
+
+    def cleanup(self):
+        self.proc.terminate()
+
+
 class ServerSocket:
     def __init__(self, host, port):
         self.host = host
@@ -169,7 +195,8 @@ class ServerSocket:
 
 def test_wrapper():
     # pc/server address
-    host, port = '192.168.0.129', 4444  # '127.0.0.1'
+    host = socket.gethostbyname(socket.gethostname())
+    port = 4444
 
     # omni drive
     lin_act_pins = {'up': 22, 'down': 4, 'enable': 27}
@@ -221,7 +248,8 @@ def test_wrapper():
 
 def just_read_motion():
     # pc/server address
-    host, port = '192.168.0.129', 4444  # '127.0.0.1'
+    host = socket.gethostbyname(socket.gethostname())
+    port = 4444
     print_delay = .8
 
     with ServerSocket(host, port) as conn:

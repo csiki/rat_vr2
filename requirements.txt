@@ -17,3 +17,6 @@ pyserial
 # setting up spi ports:
 #   sudo nano /boot/config.txt
 #   uncomment line "dtparam=spi=on"
+
+# set up pulseaudio for audio over wifi:
+#   https://raspberrypi.stackexchange.com/questions/11735/using-pi-to-stream-all-audio-output-from-my-pc-to-my-stereo

@@ -71,10 +71,10 @@ class OmniDrive:
              [np.sin(np.pi / 3), np.cos(np.pi / 3), self.def_d]]
         )
         # TODO last calibration best:
-        self.trans_mx = np.array(
-            [[ 9.608279,    0.7030483,   0.19814108],
-             [-0.17366488, -1.2253994,   0.16833168],
-             [-9.72685,     0.5778875,   0.13894492]])
+        # self.trans_mx = np.array(
+        #     [[ 9.608279,    0.7030483,   0.19814108],
+        #      [-0.17366488, -1.2253994,   0.16833168],
+        #      [-9.72685,     0.5778875,   0.13894492]])
 
         self.roller_pins = roller_pins
         self.pwm_freq = pwm_freq
@@ -420,16 +420,21 @@ class OmniDrive:
         motions = np.abs(np.array(motions))  # same
         axes = np.argmax(np.abs(drive_vs), axis=1)
 
-        for axis in [0, 1, 2]:
+        print('pwm to motion:')
+        for axis in range(OmniDrive.AXES):
             dv = drive_vs[axes == axis, axis]  # pwms (see scaling above)
             mv = motions[axes == axis, axis] / drive_t  # motion/sec
             p0 = np.ones(2)
+            print(f'AXIS {axis}:\n\tdv: {dv}\n\tmv: {mv}')
 
             popt, pcov = curve_fit(OmniDrive.PWM_2_MOTION_FUN, dv, mv, p0)
             self.pwm_to_motion_p[axis, :] = popt
             self.pwm_to_motion_scaler[axis] = np.mean(mv / dv)
 
             print(f'axis {axis}) popt: {popt.tolist()}')
+
+        print('pwm_to_motion_p:', self.pwm_to_motion_p)
+        print('pwm_to_motion_scaler:', self.pwm_to_motion_scaler)
 
     def calibrate_full_rot(self, ball_r):  # ball_r in cm TODO test
         # defines motion to angle (rad) transfer function
@@ -726,9 +731,9 @@ def calibrate(calibration_path, **calib_kwargs):  # TODO argparsed input from ma
 
     # calibrate
     print('Calibrate transfer function')
-    # omni_drive.calibrate_transfer_fun() # TODO
+    # omni_drive.calibrate_transfer_fun()
     print('Calibrate speed')
-    # omni_drive.calibrate_speed() # TODO
+    omni_drive.calibrate_speed() # TODO
     print('Calibrate full rotation')
     omni_drive.calibrate_full_rot(ball_r=20)
     # omni_drive.calibrate_game_movement()  # results of this step is not yet used + it needs game to run
@@ -750,8 +755,8 @@ def main():
         speed = float(sys.argv[2]) if len(sys.argv) > 2 else .7
         man_drive(speed)
     elif function == 'calibrate':
-        calibration_path = sys.argv[2]
-        cm_per_game_dist_unit = float(sys.argv[3])
+        calibration_path = sys.argv[2]  # omni_calib.pckl
+        cm_per_game_dist_unit = float(sys.argv[3])  #
         calibrate(calibration_path, cm_per_game_dist_unit=cm_per_game_dist_unit)
     elif function == 'test':
         calibration_path = sys.argv[2] if len(sys.argv) > 2 else None
