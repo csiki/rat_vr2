@@ -54,11 +54,14 @@ class DOOM(gym.Env):
 
     # named tuple, with names derived by lower casing game var names
     # use GAME_VAR_RENAMING if possible
-    GAME_STATE_T = namedtuple('game_state_t', [GAME_VAR_RENAMING.get(v, str(v)[str(v).find('.') + 1:].lower())
-                                               for v in GAME_VARS])
+    # GAME_STATE_T = namedtuple('game_state_t', [GAME_VAR_RENAMING.get(v, str(v)[str(v).find('.') + 1:].lower())
+    #                                            for v in GAME_VARS])  # TODO can't do this here in py3
 
     def __init__(self, wad_path, map_id, cfg=DEFAULT_CFG):
         super().__init__()
+
+        self.game_state_t = namedtuple('game_state_t', [DOOM.GAME_VAR_RENAMING.get(v, str(v)[str(v).find('.') + 1:].lower())
+                                                        for v in DOOM.GAME_VARS])
 
         self.cfg = cfg
 
@@ -116,11 +119,11 @@ class DOOM(gym.Env):
         #   max speed originally is 30 mu/tic
         self.tic_per_sec = 35.
         self.map_unit_per_cm = 8. / 30.48
-        self.map_degree_per_rad = 0.5 / np.pi  # game degree in [0, 1]
+        self.map_degree_per_rad = 0.5 / np.pi
         move_speed_rng = cfg['max_player_speed'] / self.tic_per_sec * self.map_unit_per_cm  # map_unit / tic
-        move_turn_rng = np.pi * self.map_degree_per_rad
-        move_space = gym.spaces.Box(low=np.array([-move_speed_rng, -move_speed_rng, -move_turn_rng]),
-                                    high=np.array([move_speed_rng, move_speed_rng, move_turn_rng]))
+        move_turn_rng = (-0.5, 0.5)  # game degree in [0, 1]
+        move_space = gym.spaces.Box(low=np.array([-move_speed_rng, -move_speed_rng, move_turn_rng[0]]),
+                                    high=np.array([move_speed_rng, move_speed_rng, move_turn_rng[1]]))
         shoot_space = gym.spaces.Discrete(2)  # shoot or no
         self.action_space = gym.spaces.Tuple([move_space, shoot_space])
         self.observation_space = gym.spaces.Discrete(2)  # not really used, just here for gym's sake for now
@@ -128,7 +131,7 @@ class DOOM(gym.Env):
         self.step_i = None
         self.start_ammo = None
 
-    def _get_state(self) -> GAME_STATE_T:
+    def _get_state(self):
         state = self.game.get_state()
         game_over = state is None
         game_state = None
@@ -136,7 +139,7 @@ class DOOM(gym.Env):
         if not game_over:
             self.step_i = state.number
             game_vars = state.game_variables
-            game_state = DOOM.GAME_STATE_T(*game_vars)
+            game_state = self.game_state_t(*game_vars)
 
         return game_state, game_over
 
@@ -152,9 +155,17 @@ class DOOM(gym.Env):
         # get state
         state, game_over = self._get_state()
 
+        if state.wall_bump_angle != -1:
+            print('player angle:', state.angle)
+            print('wall angle:', state.wall_bump_angle)
+            # TODO return wall bumping situation - calculate the players angle at the wall when bumped - use state.wall_bump_angle
+            #   front p: 90, w: 25
+            #   back: p: 90, w: 75
+            #   right p: 90, w: 0
+            #   left: p: 90, w: 50
+
         step_over = time.time()
 
-        # TODO return wall bumping situation - calculate the players angle at the wall when bumped - use state.wall_bump_angle
         # TODO should save the state of the acs script: have inverse gitignore in doom/scenarios, or just in the root
 
         finished = self.game.is_episode_finished()
@@ -188,6 +199,7 @@ def doom_test():
 
     while not game_over and not step_i > 300:
         a = doom.action_space.sample()
+        # a = np.array([0, 0, 0.1]), 0
         state, reward, terminated, truncated, info = doom.step(a)
 
         step_i = info['i']

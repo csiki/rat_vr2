@@ -44,9 +44,9 @@ if fix_to_height:
     tile_size_px = (to_size_pix[0], int(src_img.shape[1] * size_multiplier))
 
 if stretch:
-    new_img = resize(src_img, to_size_pix)
+    new_img = resize(src_img, to_size_pix, order=0)
 elif just_tile or fix_to_height:
-    new_img = resize(src_img, tile_size_px)
+    new_img = resize(src_img, tile_size_px, order=0)
     # tile img if not enough width/height
     height_tile = int(np.ceil(to_size_pix[0] / new_img.shape[0]))
     width_tile = int(np.ceil(to_size_pix[1] / new_img.shape[1]))
@@ -65,7 +65,7 @@ else:
 
 # resize to word ppi
 resize_by = word_ppi / ppi
-new_img = rescale(new_img, (resize_by, resize_by, 1))
+new_img = rescale(new_img, (resize_by, resize_by, 1), order=0)
 
 print(f'resized img pix: {new_img.shape} cm: {new_img.shape[0] / word_ppc:.2f} x {new_img.shape[1] / word_ppc:.2f}')
 
