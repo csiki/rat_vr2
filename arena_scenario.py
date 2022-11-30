@@ -18,13 +18,16 @@ from pi_wrapper import PiSmoothMotion, PiMotionSensor, PiMotionSensors, PiOmniDr
 host, port = '192.168.0.129', 4444  # '127.0.0.1'
 
 
+# TODO check w sanyi not enough V going to roller motors ???
+
+
 with ServerSocket(host, port) as conn:
 
     # setup VR
     flo1 = PiMotionSensor(conn, **FRONT_MOTION_PARAMS)
     flo2 = PiMotionSensor(conn, **SIDE_MOTION_PARAMS)
     flo = PiMotionSensors(conn, flo1, flo2)
-    smooth_flo = PiSmoothMotion(conn, flo, 0.1)
+    smooth_flo = PiSmoothMotion(conn, flo, 0.05)
 
     pm = PlayerMovement(do_calc_acc=True)
 

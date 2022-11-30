@@ -24,6 +24,9 @@ from player_movement import PlayerMovement, Feedback
 from config import *
 
 
+PIDp = namedtuple('PIDp', ['Kp', 'Ki', 'Kd'])
+
+
 class OmniDrive:
     LIN_ACT_PINS = {'up': 22, 'down': 4, 'enable': 27}
     ROLLER0_PINS = {'right': 23, 'left': 24, 'pwm': 18}
@@ -31,13 +34,14 @@ class OmniDrive:
     ROLLER2_PINS = {'right': 25, 'left': 26, 'pwm': 12}
     ROLLER_PINS = [ROLLER0_PINS, ROLLER1_PINS, ROLLER2_PINS]
 
+    # TODO integrate manual mode into OmniDrive, so it can be activated, so user can test it in game, with keymapping ?
+
     # FB_FUN_TYPE =
-    PIDp = namedtuple('PIDp', ['Kp', 'Ki', 'Kd'])
     AXES = 3  # forward/backward, left/right strafe, left/right turn
     PWM_2_MOTION_FUN = lambda x, *p: x * p[0] + p[1]  # uses pwm_to_motion_p params for each axis
 
     def __init__(self, roller_pins=ROLLER_PINS, lin_act_pins=LIN_ACT_PINS, up_trans_t=4, down_trans_t=4,
-                 mount_tracking=False, pwm_freq=1000, calib_path=None):
+                 mount_tracking=False, pwm_freq=100, calib_path=None):
 
         self.roller_dirs = np.array(['left', 'right'])
         self.simple_dirs_v = {'forward': [1., 0., 0.], 'backward': [-1., 0., 0.],  # v, vn, w
@@ -48,10 +52,14 @@ class OmniDrive:
         self.noise_floors = np.zeros(OmniDrive.AXES)  # noise/second; 3 axes
         self.pwm_to_motion_p = np.stack([np.ones(OmniDrive.AXES), np.zeros(OmniDrive.AXES)], axis=1)  # lin fun
         self.pwm_to_motion_scaler = np.ones(OmniDrive.AXES)  # scaler to translate motion/sec; no bias like above here
+        self.pwm_to_motion_min_pwm = np.zeros(OmniDrive.AXES)
         # TODO last calibration:
-        #   axis 0) popt: [7704.327051141399, -217.8399065554388]
-        #   axis 1) popt: [9066.412009890513, -1687.9866419798052]
-        #   axis 2) popt: [8536.199838574827, -628.5999509056599]
+        #   pwm_to_motion_min_pwm: [0.55, 0.75, 0.6]
+        #   pwm_to_motion_p: [[9532.5447591, -3798.82920069], [21748.57643458, -15016.18802188], [13136.44569683, -6056.54212003]]
+        #   pwm_to_motion_scaler: [4123.62066589, 4261.17269823, 5083.19382685]
+        self.pwm_to_motion_min_pwm = np.array([0.55, 0.75, 0.6])
+        self.pwm_to_motion_p = np.array([[9532.5447591, -3798.82920069], [21748.57643458, -15016.18802188], [13136.44569683, -6056.54212003]])
+        self.pwm_to_motion_scaler = np.array([4123.62066589, 4261.17269823, 5083.19382685])
 
         self.motion_per_rad = None  # amount of motion detected for 1 rad turn
         self.motion_per_cm = None  # same but in cms (measured only for turn, but should generalize)
@@ -59,7 +67,7 @@ class OmniDrive:
         self.drive_2_game_acc = [None, None, None]  # how drive speed translates to in-game acceleration
 
         # pid stuff
-        self.pid_p = [OmniDrive.PIDp(0., 0., 0.) for _ in range(OmniDrive.AXES)]  # PID parameters
+        self.pid_p = [PIDp(0., 0., 0.) for _ in range(OmniDrive.AXES)]  # PID parameters
         self.pid_dt = 0.05  # sec; time constant, time between PID updates
         self.pid_err_scalers = np.ones(OmniDrive.AXES)  # scales err according to pwm to delta game pos
 
@@ -93,12 +101,13 @@ class OmniDrive:
         self.lin_act = LinActuator(lin_act_pins)
 
         # update already calibrated vars
-        if calib_path:
+        if calib_path:  # TODO use get and setattr; this is ugly
             with open(calib_path, 'rb') as f:
                 calib = pickle.load(f)
             self.noise_floors = calib['noise_floors']
             self.pwm_to_motion_p = calib['pwm_to_motion_p']
             self.pwm_to_motion_scaler = calib['pwm_to_motion_scaler']
+            self.pwm_to_motion_min_pwm = calib['pwm_to_motion_min_pwm']
             self.pid_p = calib['pid_p']
             self.pid_dt = calib['pid_dt']
             self.pid_err_scalers = calib['pid_err_scalers']
@@ -130,12 +139,12 @@ class OmniDrive:
             self.letgo(blocking=True)
             self.mounted = False
 
-    def save(self, calib_path):
+    def save(self, calib_path):  # TODO use get and setattr; this is ugly
         calib = {'noise_floors': self.noise_floors, 'pwm_to_motion_p': self.pwm_to_motion_p,
                  'pid_p': self.pid_p, 'pid_dt': self.pid_dt, 'pid_err_scalers': self.pid_err_scalers,
                  'trans_mx': self.trans_mx, 'motion_per_rad': self.motion_per_rad, 'motion_per_cm': self.motion_per_cm,
                  'drive_2_game_vel': self.drive_2_game_vel, 'drive_2_game_acc': self.drive_2_game_acc,
-                 'pwm_to_motion_scaler': self.pwm_to_motion_scaler}
+                 'pwm_to_motion_scaler': self.pwm_to_motion_scaler, 'pwm_to_motion_min_pwm': self.pwm_to_motion_min_pwm}
 
         with open(calib_path, 'wb') as f:
             pickle.dump(calib, f)
@@ -166,7 +175,14 @@ class OmniDrive:
         if highest_abs_v > 1.:
             print(f'Highest absolute velocity cannot be over 1.0: {highest_abs_v}!', file=sys.stderr)
 
-        drive_v[0] = -1 * drive_v[0]  # flip forward-backward
+        # flip forward-backward
+        drive_v[0] = -1 * drive_v[0]
+
+        # translate wheel_v to ignore low pwms that would not move the ball: [0,1] -> [min_pwm,1]
+        # leave 0s as 0s tho
+        abs_drive_v = np.abs(drive_v)
+        abs_drive_v = (self.pwm_to_motion_min_pwm + abs_drive_v * (1. - self.pwm_to_motion_min_pwm)) * (abs_drive_v > 0)
+        drive_v = abs_drive_v * ((drive_v > 0) * 2 - 1)  # +-
 
         wheel_v = np.matmul(self.trans_mx, drive_v.transpose())
         wheel_v_normed = wheel_v / np.abs(wheel_v).max() * highest_abs_v  # normalize then scale back to requested velocity
@@ -219,7 +235,7 @@ class OmniDrive:
         if simple_dir not in self.simple_dirs_v:
             print(f'Direction {simple_dir} is not any of: {", ".join(self.simple_dirs_v)}!', file=sys.stderr)
             return
-        print(f'Drive {simple_dir} for {t} seconds')
+        print(f'Drive {simple_dir} for {t} seconds at speed {speed:.2f}')
 
         drive_v = self.simple_dirs_v[simple_dir] * speed
         wheel_dir, wheel_dc = self.calc_wheel_v(drive_v)
@@ -386,6 +402,7 @@ class OmniDrive:
     def calibrate_speed(self):  # sets pwm_to_motion_p and pwm_to_motion_scaler
         # try different speeds, compare with motion sensor recording,
         # establish drive velocity (motor pwm) to motion velocity function for each axis
+        nrep = 2  # how many repetitions in each axis/dir
         drive_t = 5  # s
         pwms_to_try = np.linspace(0.1, 1.0, 10)
         dirs_to_try = ['forward', 'backward', 'left_strafe', 'right_strafe', 'left_turn', 'right_turn']
@@ -398,21 +415,22 @@ class OmniDrive:
         motions = []
 
         for dir_i, dir_ in enumerate(dirs_to_try):
-            print('Direction:', dir_)
-            for pwm in pwms_to_try:
-                print(f'pwm: {pwm}')
+            print(f'{nrep} x direction:', dir_)
+            for _ in range(nrep):
+                for pwm in pwms_to_try:
+                    print(f'pwm: {pwm:.2f}')
 
-                drive_v = self.simple_dirs_v[dir_] * pwm
-                wheel_dir, wheel_dc = self.calc_wheel_v(drive_v)
-                drive_vs.append(drive_v)
+                    drive_v = self.simple_dirs_v[dir_] * pwm
+                    wheel_dir, wheel_dc = self.calc_wheel_v(drive_v)
+                    drive_vs.append(drive_v)
 
-                flo.loop()
-                flo.get_rel_motion()  # zero out rel vars
-                self.drive(wheel_dir, wheel_dc, t=drive_t, blocking=True)
+                    flo.loop()
+                    flo.get_rel_motion()  # zero out rel vars
+                    self.drive(wheel_dir, wheel_dc, t=drive_t, blocking=True)
 
-                flo.loop()
-                motion = flo.get_rel_motion()
-                motions.append(motion)
+                    flo.loop()
+                    motion = flo.get_rel_motion()
+                    motions.append(motion)
 
         # establish pwm to motion velocity function for each axis
         #   do scipy function fitting for each axis
@@ -420,27 +438,47 @@ class OmniDrive:
         motions = np.abs(np.array(motions))  # same
         axes = np.argmax(np.abs(drive_vs), axis=1)
 
+        # experimentally: anything below 500 motion is noise; the function of drive to motion looks like a ReLU;
+        #   find highest drive_vs where the motion is close to 0, i.e. <500, call it low_end
+        #   from low_end to max(drive_vs) fit a linear function;
+        #   don't drive wheels below a drive of low_end --> scale drive_vs of [0,1] to [low_end, 1] later
+        noise_motion = 500
         print('pwm to motion:')
         for axis in range(OmniDrive.AXES):
+
             dv = drive_vs[axes == axis, axis]  # pwms (see scaling above)
             mv = motions[axes == axis, axis] / drive_t  # motion/sec
-            p0 = np.ones(2)
-            print(f'AXIS {axis}:\n\tdv: {dv}\n\tmv: {mv}')
+            print(f'AXIS {axis}:\n\tdv: {dv.tolist()}\n\tmv: {mv.tolist()}')
 
-            popt, pcov = curve_fit(OmniDrive.PWM_2_MOTION_FUN, dv, mv, p0)
+            # find low_end for each direction in an axis
+            dv1, dv2 = dv[:len(dv) // 2], dv[len(dv) // 2:]
+            mv1, mv2 = mv[:len(mv) // 2], mv[len(mv) // 2:]
+
+            low_end1_i = np.max(np.arange(len(mv1))[mv1 < noise_motion])
+            low_end2_i = np.max(np.arange(len(mv2))[mv2 < noise_motion])
+
+            # the actual low_end is the avg of the two directions, to have one dv to mv function for each axis
+            low_end = (dv1[low_end1_i] + dv2[low_end2_i]) / 2
+            self.pwm_to_motion_min_pwm[axis] = low_end
+
+            # do one curve fit for all >low_end
+            p0 = np.ones(2)  # slope and bias
+            dvf = np.concatenate([dv1[low_end1_i:], dv2[low_end2_i:]])
+            mvf = np.concatenate([mv1[low_end1_i:], mv2[low_end2_i:]])
+            popt, pcov = curve_fit(OmniDrive.PWM_2_MOTION_FUN, dvf, mvf, p0)
+
             self.pwm_to_motion_p[axis, :] = popt
-            self.pwm_to_motion_scaler[axis] = np.mean(mv / dv)
+            self.pwm_to_motion_scaler[axis] = np.mean(mvf / dvf)
 
-            print(f'axis {axis}) popt: {popt.tolist()}')
-
+        print('pwm_to_motion_min_pwm:', self.pwm_to_motion_min_pwm)
         print('pwm_to_motion_p:', self.pwm_to_motion_p)
         print('pwm_to_motion_scaler:', self.pwm_to_motion_scaler)
 
-    def calibrate_full_rot(self, ball_r):  # ball_r in cm TODO test
+    def calibrate_full_rot(self, ball_r):  # ball_r in cm
         # defines motion to angle (rad) transfer function
         print('Press the \'right\' key until a full rotation occurs; press \'left\' to correct; press Esc to finish')
 
-        drive_v = .5
+        drive_v = 1.  # TODO not enough V going to motors ???
         nruns = 5
 
         flo1 = MotionSensor(**FRONT_MOTION_PARAMS)
@@ -468,12 +506,15 @@ class OmniDrive:
                 on_release=_release,
                 until='esc'
             )
-            complete_turn.append(flo.get_rel_motion())
+            complete_turn.append(flo.get_rel_motion()[2])  # only get the turn axis
 
-        complete_turn = np.mean(complete_turn, axis=0)[-1]  # could use rest of complete turn for noise floor estimation
+        complete_turn = np.mean(complete_turn)
 
         self.motion_per_rad = complete_turn / (2 * np.pi)
         self.motion_per_cm = complete_turn / (2 * ball_r * np.pi)
+
+        print('motion_per_rad:', self.motion_per_rad)
+        print('motion_per_cm:', self.motion_per_cm)
 
     # TODO test run
     def calibrate_game_movement(self, feedback: Feedback, set_rel_goal: Callable[[np.ndarray], Any],
@@ -605,9 +646,36 @@ class OmniDrive:
         Kps = 1. / (self.pwm_to_motion_scaler * self.pid_dt)
         for axis in range(OmniDrive.AXES):
             # set very low Ki and Kd just to play around  # TODO test
-            self.pid_p[axis] = OmniDrive.PIDp(Kps[axis], Kps[axis] / 20., Kps[axis] / 20.)
+            self.pid_p[axis] = PIDp(Kps[axis], Kps[axis] / 10., Kps[axis] / 10.)
 
         # TODO implement actual incremental calibration as described above
+
+
+def calibrate(calibration_path, **calib_kwargs):  # TODO argparsed input from main
+    omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4)
+    omni_drive.setup()
+    omni_drive.mount()
+
+    def exit_code(*args):
+        omni_drive.cleanup()
+        exit(0)
+
+    signal.signal(signal.SIGINT, exit_code)
+
+    # calibrate
+    print('Calibrate transfer function..')
+    omni_drive.calibrate_transfer_fun()
+    print('Calibrate speed..')
+    omni_drive.calibrate_speed()
+    print('Calibrate full rotation..')
+    omni_drive.calibrate_full_rot(ball_r=20)
+    # omni_drive.calibrate_game_movement()  # results of this step is not yet used + it needs game to run
+    print('Calibrate PID parameters..')
+    omni_drive.calibrate_pid_params(calib_kwargs['cm_per_game_dist_unit'])
+
+    # save results
+    omni_drive.save(calibration_path)
+    print('Calibration saved under:', calibration_path)
 
 
 def wheel_tests(omni_drive: OmniDrive):
@@ -659,7 +727,7 @@ def wheel_tests(omni_drive: OmniDrive):
 
 def onmni_test(calibratopn_path=None):
 
-    omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4, pwm_freq=1000, calib_path=calibratopn_path)
+    omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4, calib_path=calibratopn_path)
     omni_drive.setup()
 
     def exit_code(*args):
@@ -675,7 +743,7 @@ def onmni_test(calibratopn_path=None):
 
 def man_drive(speed):
 
-    omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4, pwm_freq=1000)
+    omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4)
     omni_drive.setup()
 
     def exit_code(*args):
@@ -718,32 +786,6 @@ def man_drive(speed):
     omni_drive.cleanup()
 
 
-def calibrate(calibration_path, **calib_kwargs):  # TODO argparsed input from main
-    omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4, pwm_freq=1000)
-    omni_drive.setup()
-    omni_drive.mount()
-
-    def exit_code(*args):
-        omni_drive.cleanup()
-        exit(0)
-
-    signal.signal(signal.SIGINT, exit_code)
-
-    # calibrate
-    print('Calibrate transfer function')
-    # omni_drive.calibrate_transfer_fun()
-    print('Calibrate speed')
-    omni_drive.calibrate_speed() # TODO
-    print('Calibrate full rotation')
-    omni_drive.calibrate_full_rot(ball_r=20)
-    # omni_drive.calibrate_game_movement()  # results of this step is not yet used + it needs game to run
-    print('Calibrate PID parameters')
-    omni_drive.calibrate_pid_params(calib_kwargs['cm_per_game_dist_unit'])
-
-    # save results
-    omni_drive.save(calibration_path)
-
-
 def main():
     # man args: speed
     # calibrate args: calibration_path cm_per_game_dist_unit  # TODO argparse
@@ -756,7 +798,7 @@ def main():
         man_drive(speed)
     elif function == 'calibrate':
         calibration_path = sys.argv[2]  # omni_calib.pckl
-        cm_per_game_dist_unit = float(sys.argv[3])  #
+        cm_per_game_dist_unit = float(sys.argv[3])  # 3.81
         calibrate(calibration_path, cm_per_game_dist_unit=cm_per_game_dist_unit)
     elif function == 'test':
         calibration_path = sys.argv[2] if len(sys.argv) > 2 else None
