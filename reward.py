@@ -1,5 +1,6 @@
 import serial
 from functools import reduce
+from config import *
 
 # Data format: $DOOM,[Valve Open Millisec(int)],[Pressure SetPoint(float)],
 #   [Pump Override Control Millisec(int)],[Left Blow Millisec(int)],
@@ -11,7 +12,7 @@ class RewardCircuit:
     RESP_BEG_STR = ' > > > '
     RESP_END_STR = 'kPa'
 
-    def __init__(self, serial_port, pressure_setpoint, valve_ms_per_ul):  # TODO have default value for setpoint
+    def __init__(self, serial_port, pressure_setpoint=PRESSURE_SETPOINT, valve_ms_per_ul=VALVE_MS_PER_UL):
         self.pressure_setpoint = pressure_setpoint
         self.valve_ms_per_ul = valve_ms_per_ul
         self.ser = serial.Serial(serial_port, baudrate=57600, timeout=0.05)

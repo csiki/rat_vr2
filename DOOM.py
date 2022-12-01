@@ -148,13 +148,14 @@ class DOOM(gym.Env):
 
         # action
         move, shoot = action
-        move[:2] = move[:2] / self.tic_per_sec * self.map_unit_per_cm  # todo * self.cfg['skiprate'] ?
-        move[2] = move[2] * self.map_degree_per_rad
+        # move[:2] = move[:2] / self.tic_per_sec * self.map_unit_per_cm  # TODO !this made it too slow! todo * self.cfg['skiprate'] ?
+        # move[2] = move[2] * self.map_degree_per_rad  # TODO !this made it too slow!
         reward = self.game.make_action(move.tolist() + [shoot], self.cfg['skiprate'])
 
         # get state
         state, game_over = self._get_state()
 
+        print('player angle:', state.angle)
         if state.wall_bump_angle != -1:
             print('player angle:', state.angle)
             print('wall angle:', state.wall_bump_angle)
@@ -163,6 +164,8 @@ class DOOM(gym.Env):
             #   back: p: 90, w: 75
             #   right p: 90, w: 0
             #   left: p: 90, w: 50
+            # TODO !!!!!!!!!!!!!!!!! first need to reassign degrees to walls according to the new wad (script)
+            # TODO what we want: wall hit front: 0, right-90: 1, left-90: -1
 
         step_over = time.time()
 
@@ -198,8 +201,8 @@ def doom_test():
     step_i = 0
 
     while not game_over and not step_i > 300:
-        a = doom.action_space.sample()
-        # a = np.array([0, 0, 0.1]), 0
+        # a = doom.action_space.sample()
+        a = np.array([0, 0, 1]), 0
         state, reward, terminated, truncated, info = doom.step(a)
 
         step_i = info['i']

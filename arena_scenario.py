@@ -31,11 +31,12 @@ with ServerSocket(host, port) as conn:
 
     pm = PlayerMovement(do_calc_acc=True)
 
-    calibration_path = ''  # TODO
-    od = PiOmniDrive(conn, mount_tracking=True, calib_path=calibration_path)
-    assert od.motion_per_cm is not None and od.motion_per_rad is not None
+    calibration_path = 'omni_calib.pckl'
+    od = PiOmniDrive(conn, mount_tracking=False, calib_path=calibration_path)  # TODO mount_tracking=True
+    od.setup()
+    assert od.get('motion_per_cm') is not None and od.get('motion_per_rad') is not None
 
-    rew = PiRewardCircuit(conn, 'SERIAL_PORT_ON_PI')  # TODO serial port
+    # rew = PiRewardCircuit(conn, 'SERIAL_PORT_ON_PI')  # TODO serial port
     # TODO lever
 
     # setup game
@@ -46,12 +47,15 @@ with ServerSocket(host, port) as conn:
 
         # run VR devices
         od.loop()
-        flo.loop()
+        smooth_flo.loop()
 
         # action
         movement = smooth_flo.get_vel()
-        movement[:2] /= od.motion_per_cm
-        movement[2] /= od.motion_per_rad
+        if np.any(movement > 0):
+            print('mov:', movement)
+
+        # movement[:2] /= od.get('motion_per_cm')  # TODO !made it too slow? also in doom.step()
+        # movement[2] /= od.get('motion_per_rad')  # TODO !made it too slow? also in doom.step()
         action = (movement, 0)  # TODO lever
 
         # step

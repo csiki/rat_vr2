@@ -11,7 +11,6 @@ from scipy.optimize import curve_fit
 from typing import Callable, Any, Union, Tuple, List
 import simple_pid
 import sshkeyboard
-from collections import namedtuple
 
 if find_spec('RPi'):
     import RPi.GPIO as GPIO
@@ -22,9 +21,7 @@ from actuator import LinActuator
 from motion import MotionSensor, MotionSensors
 from player_movement import PlayerMovement, Feedback
 from config import *
-
-
-PIDp = namedtuple('PIDp', ['Kp', 'Ki', 'Kd'])
+from shared_resources import *
 
 
 class OmniDrive:

@@ -39,8 +39,9 @@ class PiOverSocket:
         self._base_cls = _base_cls
         self._wrap_id = id(self)  # used on raspberry to establish correspondence between wrapped and real objects
         self._real_id = None  # once the real dev obj is instantiated remotely, this contains its remote id
-        funs = inspect.getmembers(_base_cls, predicate=inspect.isfunction)
 
+        # add functions to wrapper
+        funs = inspect.getmembers(_base_cls, predicate=inspect.isfunction)
         for fun_name, fun in funs:
             if fun_name not in ('_get_fun', '_send_cmd'):
                 f = self._get_fun(fun)
@@ -48,6 +49,21 @@ class PiOverSocket:
                 setattr(self, fun_name, f)
                 # TODO if loop is slow, could create async version of each function, naming them f'async_{fun_name}'
                 #   + implement below _async_send_cm() and _async_get_fun() AND add them above to prohibited funs above
+
+        # get and set members functions, call the __getattribute__ and __setattr__ on the other side
+        g = self._get_fun(self.__getattribute__)
+        g.__name__ = '__getattribute__'
+        setattr(self, 'get', g)
+
+        s = self._get_fun(self.__setattr__)
+        s.__name__ = '__setattr__'
+        setattr(self, 'set', s)
+
+    def get(self, field):  # overwritten in __init__
+        return None
+
+    def set(self, field, val):  # overwritten in __init__
+        pass
 
     def __getstate__(self):
         return self._base_cls, self._wrap_id, self._real_id
