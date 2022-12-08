@@ -261,6 +261,7 @@ class OmniDrive:
 
         # set up PIDs
         # no need for proportional_on_measurement
+        # TODO the err scaler converts game error to motion error
         pids = [simple_pid.PID(*self.pid_p[axis], sample_time=self.pid_dt, output_limits=(-1., 1.), setpoint=0.,
                                error_map=lambda x: x * self.pid_err_scalers[axis])
                 for axis in range(OmniDrive.AXES)]
@@ -632,7 +633,7 @@ class OmniDrive:
         #   increase Ki to reduce rise time too (causes overshoot); helps in noisy environments -> set it to a low value
         #   increase Kd to decrease overshoot; can't be used when noise is present -> set it to a low value, maybe == Ki
 
-        # cm_per_game_mov_unit: length in cm of 1 in-game distance unit
+        # cm_per_game_dist_unit: length in cm of 1 in-game distance unit
         # turn in-game error into motion error, by first translating it into cm, then to motion
         self.pid_err_scalers[[0, 1]] = cm_per_game_dist_unit * self.motion_per_cm  # -> err * this => motion err
         self.pid_err_scalers[2] = self.motion_per_rad  # turn in rad -> turn in motion
@@ -738,9 +739,9 @@ def onmni_test(calibratopn_path=None):
     omni_drive.cleanup()
 
 
-def man_drive(speed):
+def man_drive(speed, calibration_path):
 
-    omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4)
+    omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4, calib_path=calibration_path)
     omni_drive.setup()
 
     def exit_code(*args):
@@ -784,16 +785,17 @@ def man_drive(speed):
 
 
 def main():
-    # man args: speed
+    # man args: speed calibration_path
     # calibrate args: calibration_path cm_per_game_dist_unit  # TODO argparse
     # test args: calibration_path
     function = sys.argv[1]  # must be 'man', 'calibrate' or 'test'
-    assert function in ['man', 'calibrate', 'test']
+    assert function in ['man', 'calib', 'test']
 
     if function == 'man':
         speed = float(sys.argv[2]) if len(sys.argv) > 2 else .7
-        man_drive(speed)
-    elif function == 'calibrate':
+        calibration_path = sys.argv[3] if len(sys.argv) > 3 else None
+        man_drive(speed, calibration_path)  # TODO add calibration file path (optional)
+    elif function == 'calib':
         calibration_path = sys.argv[2]  # omni_calib.pckl
         cm_per_game_dist_unit = float(sys.argv[3])  # 3.81
         calibrate(calibration_path, cm_per_game_dist_unit=cm_per_game_dist_unit)

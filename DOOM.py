@@ -32,6 +32,10 @@ class DOOM(gym.Env):
         'shot_r': -10,
         'dmg_taken_r': -1,  # / hp
         'max_player_speed': 500,  # cm/s; rat max is 500
+        # degree of bump to left/right where the opposite puffer is at 0
+        # there is a gradient of puffing power of the opposite puffer from 0 to the sides at this degree
+        # this is true too for bump angles at the +-90 +- delta ranges
+        'puff_delta_share_degree': 10,
     }
 
     # variable naming: https://github.com/mwydmuch/ViZDoom/issues/210
@@ -57,13 +61,15 @@ class DOOM(gym.Env):
     # GAME_STATE_T = namedtuple('game_state_t', [GAME_VAR_RENAMING.get(v, str(v)[str(v).find('.') + 1:].lower())
     #                                            for v in GAME_VARS])  # TODO can't do this here in py3
 
-    def __init__(self, wad_path, map_id, cfg=DEFAULT_CFG):
+    def __init__(self, wad_path, map_id, cfg=None):
         super().__init__()
 
         self.game_state_t = namedtuple('game_state_t', [DOOM.GAME_VAR_RENAMING.get(v, str(v)[str(v).find('.') + 1:].lower())
                                                         for v in DOOM.GAME_VARS])
 
-        self.cfg = cfg
+        self.cfg = DOOM.DEFAULT_CFG
+        if cfg is not None:  # if cfg is given..
+            self.cfg.update(cfg)  # update only the default
 
         self.game = DoomGame()
         self.game.set_doom_scenario_path(wad_path)
@@ -148,9 +154,9 @@ class DOOM(gym.Env):
 
         # action
         move, shoot = action
-        # move[:2] = move[:2] / self.tic_per_sec * self.map_unit_per_cm  # TODO !this made it too slow! todo * self.cfg['skiprate'] ?
-        # move[2] = move[2] * self.map_degree_per_rad  # TODO !this made it too slow!
-        reward = self.game.make_action(move.tolist() + [shoot], self.cfg['skiprate'])
+        move[:2] = move[:2] / self.tic_per_sec * self.map_unit_per_cm  # TODO !this made it too slow! todo * self.cfg['skiprate'] ?
+        move[2] = move[2] * self.map_degree_per_rad  # TODO !this made it too slow!
+        reward = self.game.make_action(move.todlist() + [shoot], self.cfg['skiprate'])
 
         # get state
         state, game_over = self._get_state()
@@ -159,13 +165,16 @@ class DOOM(gym.Env):
         if state.wall_bump_angle != -1:
             print('player angle:', state.angle)
             print('wall angle:', state.wall_bump_angle)
+            p_angle = state.angle
+            w_angle = state.wall_bump_angle
+            b_angle = (p_angle - w_angle) % 360  # bump angle, front is 0, increasing clockwise
+            b_angle = -(360 - b_angle) if b_angle > 180 else b_angle  # [0,360] -> [-180,+180]
+
+            # TODO ! from 0 to -delta right puff (opposite) goes from 1 to 0; vica versa
+            #   define left_puff and right_puff separately
+
             # TODO return wall bumping situation - calculate the players angle at the wall when bumped - use state.wall_bump_angle
-            #   front p: 90, w: 25
-            #   back: p: 90, w: 75
-            #   right p: 90, w: 0
-            #   left: p: 90, w: 50
-            # TODO !!!!!!!!!!!!!!!!! first need to reassign degrees to walls according to the new wad (script)
-            # TODO what we want: wall hit front: 0, right-90: 1, left-90: -1
+
 
         step_over = time.time()
 

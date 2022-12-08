@@ -54,8 +54,8 @@ with ServerSocket(host, port) as conn:
         if np.any(movement > 0):
             print('mov:', movement)
 
-        # movement[:2] /= od.get('motion_per_cm')  # TODO !made it too slow? also in doom.step()
-        # movement[2] /= od.get('motion_per_rad')  # TODO !made it too slow? also in doom.step()
+        movement[:2] /= od.get('motion_per_cm')  # TODO !made it too slow? also in doom.step()
+        movement[2] /= od.get('motion_per_rad')  # TODO !made it too slow? also in doom.step()
         action = (movement, 0)  # TODO lever
 
         # step
