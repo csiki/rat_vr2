@@ -5,6 +5,7 @@ import importlib
 from typing import Callable, Any, Union, Tuple, List
 from collections import deque
 from importlib.util import find_spec
+from config import *
 
 if find_spec('pmw3901'):
     from pmw3901 import PMW3901, PAA5100
@@ -21,35 +22,51 @@ class MotionSensor:  # on-ball movement tracking
         self.sensor = sensor_class(spi_port=spi_port, spi_cs=spi_cs, spi_cs_gpio=spi_cs_gpio[spi_slot])
         self.sensor.set_orientation(invert_x=invert_x, invert_y=invert_y, swap_xy=swap_xy)
 
+        self.naxes = 2
         self._last_rel_t, self._last_rec = time.time(), 0
         self.rel_x, self.rel_y = 0, 0
         self.abs_x, self.abs_y = 0, 0
+
         self._reset_rel_next_iter = False
+        self._has_run_get_rel_motion = True
+        # self._rel_mot_cache, self._dt_cache = np.zeros(self.naxes, dtype=np.float32), np.float32(0.)
 
     def loop(self):
         # reset relative motion if get_rel_motion() was called after the previous loop() run
         if self._reset_rel_next_iter:
             self.rel_x, self.rel_y = 0, 0
+            # self._rel_mot_cache, self._dt_cache = np.zeros(self.naxes, dtype=np.float32), np.float32(0.)
             self._last_rel_t = self._last_rec
             self._reset_rel_next_iter = False
 
         # store motion information
-        try:
-            x, y = self.sensor.get_motion(timeout=0.001)
-            self._last_rec = time.time()  # FIXME moved it here; is this fine? still not accurate enough - maybe the limitation of the sensor
-            self.rel_x += x
-            self.rel_y += y
-            self.abs_x += x
-            self.abs_y += y
-        except RuntimeError as e:
-            pass  # timed out waiting for motion data
+        if self._has_run_get_rel_motion:
+            try:
+                x, y = self.sensor.get_motion(timeout=0.001)
+                self._last_rec = time.time()  # FIXME moved it here; is this fine? still not accurate enough - maybe the limitation of the sensor
+                self.rel_x += x
+                self.rel_y += y
+                self.abs_x += x
+                self.abs_y += y
+                self._has_run_get_rel_motion = False
+            except RuntimeError:
+                pass  # timed out waiting for motion data
 
     def get_rel_motion(self, get_dt=False):
+        # # # get_rel_motion() has been run since the last loop, use cache
+        # # # this may happen when multiple motion sensor object points at the same physical sensor
+        # if self._reset_rel_next_iter:
+        #     if get_dt:
+        #         return self._rel_mot_cache, self._dt_cache
+        #     return self._rel_mot_cache
+
+        self._has_run_get_rel_motion = True
         rel_mot = np.array([self.rel_x, self.rel_y], dtype=np.float32)
         self._reset_rel_next_iter = True
-
         dt = np.float32(self._last_rec - self._last_rel_t)
-        # self._last_rel_t = time.time()
+
+        # self._rel_mot_cache = rel_mot
+        # self._dt_cache = dt
 
         if get_dt:
             return rel_mot, dt
@@ -65,14 +82,12 @@ class MotionSensor:  # on-ball movement tracking
 
 class MotionSensors:  # 3 degrees of freedom
 
-    # front, then side sensor mapping; first int is motion axis index of a sensor, second is the 3 DoF axis index
-    DEFAULT_AXIS_MAPPING = [((0, 0), (1, 2)), ((0, 1), (1, 2))]
-
     def __init__(self, front_flo: MotionSensor, side_flo: MotionSensor,
-                 axis_mapping: List[Tuple[Tuple[int, int], Tuple[int, int]]] = DEFAULT_AXIS_MAPPING):
+                 axis_mapping: List[Tuple[Tuple[int, int], Tuple[int, int]]] = MOTION_SENSORS_AXIS_MAPPING):
         self.front_flo = front_flo
         self.side_flo = side_flo
         self.axis_mapping = axis_mapping
+        self.naxes = 3
 
     def loop(self):
         self.front_flo.loop()
@@ -124,23 +139,23 @@ class SmoothMotion:  # MotionSensor wrapper
             within_t = past - smooth_dt  # smooth_dt = 6; 4, 1, -1, -4, -5
             t_occupied = np.clip(dts - within_t, 0, None)  # 0, 1, 4, 5, 6
             t_occupied = np.min([t_occupied, dts], axis=0)  # 0, 1, 3, 1, 1
-            weight = t_occupied / t_occupied.sum()  # normalize
+            weight = t_occupied / t_occupied.sum() if t_occupied.sum() != 0 else np.zeros_like(t_occupied)  # normalize
             return weight
 
         self.smoothing = _smoothing
 
     def loop(self):
         self.flo.loop()
-        # record motion at each loop
+
+    def get_vel(self):
         rel_mot, dt = self.flo.get_rel_motion(get_dt=True)
         self._rel_mots.append(rel_mot)
         self._dts.append(dt)
 
-    def get_vel(self):
         # computes velocity over time by weighting velocities in the given past window by their dt,
         # that is, velocities that were present for longer are weighted higher in the mean
         if sum(self._dts, 0.) < self.smooth_dt:
-            return np.zeros(3)
+            return np.zeros(self.flo.naxes)
 
         rel_mots = np.asarray(self._rel_mots)  # (time, axes)
         dts = np.asarray(self._dts)  # example: 3, 2, 3, 1, 1

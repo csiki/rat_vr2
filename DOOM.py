@@ -57,15 +57,15 @@ class DOOM(gym.Env):
     # GAME_STATE_T = namedtuple('game_state_t', [GAME_VAR_RENAMING.get(v, str(v)[str(v).find('.') + 1:].lower())
     #                                            for v in GAME_VARS])  # TODO can't do this here in py3
 
-    def __init__(self, wad_path, map_id, cfg=None):
+    def __init__(self, wad_path, map_id, cfg_update=None):
         super().__init__()
 
         self.game_state_t = namedtuple('game_state_t', [DOOM.GAME_VAR_RENAMING.get(v, str(v)[str(v).find('.') + 1:].lower())
                                                         for v in DOOM.GAME_VARS])
 
         self.cfg = DOOM.DEFAULT_CFG
-        if cfg is not None:  # if cfg is given..
-            self.cfg.update(cfg)  # update only the default
+        if cfg_update is not None:  # if cfg is given..
+            self.cfg.update(cfg_update)  # update only the default
 
         self.game = DoomGame()
         self.game.set_doom_scenario_path(wad_path)
