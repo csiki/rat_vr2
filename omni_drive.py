@@ -327,6 +327,13 @@ class OmniDrive:
         GPIO.cleanup()
         print('OmniDrive cleanup done')
 
+    def motion_to_phys(self, movement: np.ndarray):
+        # scales motion sensor detected movement into physical units (cm and rad)
+        # only works properly if calibrate_full_rot() has run i.e. motion_per_rad motion_per_cm are defined
+        movement[:-1] /= self.motion_per_cm  # TODO !made it too slow? also in doom.step()
+        movement[-1] /= self.motion_per_rad
+        return movement
+
     def calibrate_transfer_fun(self):
         import torch
         import omni_transfer_opt

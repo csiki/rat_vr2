@@ -1,6 +1,8 @@
 import socket
 import time
 import traceback
+
+import matplotlib.pyplot as plt
 import numpy as np
 
 from DOOM import DOOM
@@ -9,6 +11,7 @@ from actuator import LinActuator
 from omni_drive import OmniDrive
 from player_movement import PlayerMovement, Feedback
 from config import *
+from live_testing import LiveLinePlot
 
 from pi_wrapper import PiSmoothMotion, PiMotionSensor, PiMotionSensors, PiOmniDrive, PiFeedback, \
     PiPlayerMovement, ServerSocket, PiRewardCircuit
@@ -43,6 +46,9 @@ with ServerSocket(host, port) as conn:
     doom = DOOM('doom/scenarios/arena_lowered.wad', 'map01')
     game_over = False
 
+    mov_live_plot = LiveLinePlot(nplots=3, ylim=(-1200, 1200))
+    # TODO plot all the other derived cm and game speeds to compare them
+
     while not game_over:
 
         # run VR devices
@@ -51,11 +57,11 @@ with ServerSocket(host, port) as conn:
 
         # action
         movement = smooth_flo.get_vel()
+        mov_live_plot.update(time.time(), movement)
         if np.any(movement > 0):
             print('mov:', movement)
 
-        movement[:2] /= od.get('motion_per_cm')  # TODO !made it too slow? also in doom.step()
-        movement[2] /= od.get('motion_per_rad')  # TODO !made it too slow? also in doom.step()
+        movement = od.motion_to_phys(movement)
         action = (movement, 0)  # TODO lever
 
         # step
