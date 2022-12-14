@@ -32,10 +32,6 @@ class DOOM(gym.Env):
         'shot_r': -10,
         'dmg_taken_r': -1,  # / hp
         'max_player_speed': 500,  # cm/s; rat max is 500
-        # degree of bump to left/right where the opposite puffer is at 0
-        # there is a gradient of puffing power of the opposite puffer from 0 to the sides at this degree
-        # this is true too for bump angles at the +-90 +- delta ranges
-        'puff_delta_share_degree': 10,
     }
 
     # variable naming: https://github.com/mwydmuch/ViZDoom/issues/210
@@ -75,9 +71,9 @@ class DOOM(gym.Env):
         self.game.set_doom_scenario_path(wad_path)
         self.game.set_doom_map(map_id)
 
-        self.game.set_screen_resolution(cfg['res'])
+        self.game.set_screen_resolution(self.cfg['res'])
         self.game.set_screen_format(ScreenFormat.RGB24)
-        self.game.set_render_hud(cfg['render_hud'])
+        self.game.set_render_hud(self.cfg['render_hud'])
         # self.game.add_game_args("-width 3440 -height 1440")  # -record recordings
         self.game.add_game_args("+fullscreen 1 +viz_nocheat 0")
         # self.game.add_game_args('+snd_mididevice -1 +snd_midipatchset /media/viktor/OS/csiki/rats_play_doom/doom/gm.dls')
@@ -88,30 +84,30 @@ class DOOM(gym.Env):
         self.game.set_render_decals(True)
         self.game.set_render_particles(True)
 
-        self.game.set_automap_buffer_enabled(cfg['automap'])
+        self.game.set_automap_buffer_enabled(self.cfg['automap'])
         self.game.set_automap_rotate(False)
         self.game.set_automap_render_textures(False)
         self.game.set_automap_mode(AutomapMode.OBJECTS_WITH_SIZE)
 
-        buttons = cfg['buttons']
+        buttons = self.cfg['buttons']
         for b in buttons:
             self.game.add_available_button(b)
 
         for v in DOOM.GAME_VARS:
             self.game.add_available_game_variable(v)
 
-        self.game.set_episode_timeout(cfg['ep_timeout'])
+        self.game.set_episode_timeout(self.cfg['ep_timeout'])
         self.game.set_episode_start_time(10)
-        self.game.set_window_visible(cfg['win_visible'])
+        self.game.set_window_visible(self.cfg['win_visible'])
 
-        self.game.set_living_reward(cfg['living_r'])
+        self.game.set_living_reward(self.cfg['living_r'])
         self.game.set_console_enabled(True)
 
         self.game.init()
 
         # after-init settings
         self.game.set_console_enabled(True)
-        if cfg['automap']:
+        if self.cfg['automap']:
             self.game.send_game_command('am_showmonsters true')
             self.game.send_game_command('am_colorset 2')
 
@@ -126,7 +122,7 @@ class DOOM(gym.Env):
         self.tic_per_sec = 35.
         self.map_unit_per_cm = 8. / 30.48
         self.map_degree_per_rad = 0.5 / np.pi
-        move_speed_rng = cfg['max_player_speed'] / self.tic_per_sec * self.map_unit_per_cm  # map_unit / tic
+        move_speed_rng = self.cfg['max_player_speed'] / self.tic_per_sec * self.map_unit_per_cm  # map_unit / tic
         move_turn_rng = (-0.5, 0.5)  # game degree in [0, 1]
         move_space = gym.spaces.Box(low=np.array([-move_speed_rng, -move_speed_rng, move_turn_rng[0]]),
                                     high=np.array([move_speed_rng, move_speed_rng, move_turn_rng[1]]))
@@ -145,7 +141,7 @@ class DOOM(gym.Env):
         if not game_over:
             self.step_i = state.number
             game_vars = state.game_variables
-            game_state = self.game_state_t(*game_vars)
+            game_state = self.game_state_t(*game_vars)  # cast to namedtuple
 
         return game_state, game_over
 
@@ -156,33 +152,28 @@ class DOOM(gym.Env):
         move, shoot = action
         move[:2] = move[:2] / self.tic_per_sec * self.map_unit_per_cm  # TODO !this made it too slow! todo * self.cfg['skiprate'] ?
         move[2] = move[2] * self.map_degree_per_rad  # TODO !this made it too slow!
-        reward = self.game.make_action(move.todlist() + [shoot], self.cfg['skiprate'])
+        reward = self.game.make_action(move.tolist() + [shoot], self.cfg['skiprate'])
 
         # get state
         state, game_over = self._get_state()
 
-        print('player angle:', state.angle)
+        b_angle = 0
+        b_distance = np.inf  # by default, infinite distance from walls
         if state.wall_bump_angle != -1:
-            print('player angle:', state.angle)
-            print('wall angle:', state.wall_bump_angle)
             p_angle = state.angle
             w_angle = state.wall_bump_angle
             b_angle = (p_angle - w_angle) % 360  # bump angle, front is 0, increasing clockwise
             b_angle = -(360 - b_angle) if b_angle > 180 else b_angle  # [0,360] -> [-180,+180]
-
-            # TODO ! from 0 to -delta right puff (opposite) goes from 1 to 0; vica versa
-            #   define left_puff and right_puff separately
-
-            # TODO return wall bumping situation - calculate the players angle at the wall when bumped - use state.wall_bump_angle
-
+            b_distance = 0.  # only detecting bumps for now, air puffs are either on when hitting a wall or just off
 
         step_over = time.time()
 
         # TODO should save the state of the acs script: have inverse gitignore in doom/scenarios, or just in the root
 
         finished = self.game.is_episode_finished()
-        return state, reward, state.dead, game_over or finished and not state.dead, {'i': self.step_i,
-                                                                                     'step_t': (step_over - step_start) * 1000}
+        return state, reward, state.dead, game_over or finished and not state.dead, \
+               {'i': self.step_i, 'step_t': (step_over - step_start) * 1000,
+                'bump_angle': b_angle, 'bump_distance': b_distance}
 
     def render(self) -> Optional[Union[RenderFrame, List[RenderFrame]]]:
         pass
@@ -211,7 +202,7 @@ def doom_test():
 
     while not game_over and not step_i > 300:
         # a = doom.action_space.sample()
-        a = np.array([0, 0, 1]), 0
+        a = np.array([0, 0, 0]), 0
         state, reward, terminated, truncated, info = doom.step(a)
 
         step_i = info['i']
