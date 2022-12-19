@@ -25,7 +25,7 @@ from DOOM import DOOM
 class LiveLinePlot:
     # https://matplotlib.org/stable/tutorials/advanced/blitting.html
 
-    def __init__(self, nplots=1, xlim=(-10, 0), ylim=(-1, 1), title=''):
+    def __init__(self, nplots=1, xlim=(-10, 0), ylim=(-1, 1), title='', xlabel='', ylabel=''):
         self.xlim = xlim
         self.ylim = ylim
         self.xdata, self.ydata = [], [[] for _ in range(nplots)]
@@ -36,6 +36,8 @@ class LiveLinePlot:
                     for i in range(nplots)]
         self.ax.set_xlim(*xlim)
         self.ax.set_ylim(*ylim)
+        self.ax.set_xlabel(xlabel)
+        self.ax.set_ylabel(ylabel)
         plt.legend()
         self.ax.set_title(title)
         plt.show(block=False)
@@ -97,7 +99,8 @@ if __name__ == '__main__':
         mov_1_lp = LiveLinePlot(nplots=2, ylim=(-1500, 1500), title='mov1')
         mov_2_lp = LiveLinePlot(nplots=2, ylim=(-1500, 1500), title='mov2')
         smooth_mov_lp = LiveLinePlot(nplots=3, ylim=(-1200, 1200), title='smooth')
-        # TODO plot all the other derived cm and game speeds to compare them
+        phys_mov_lp = LiveLinePlot(nplots=3, ylim=(-100, 100), title='phys')
+        # TODO track pm as well
 
         while not game_over:
 
@@ -117,7 +120,8 @@ if __name__ == '__main__':
             mov_2_lp.update(time.time(), mov2)
             smooth_mov_lp.update(time.time(), movement)
 
-            # movement = od.motion_to_phys(movement)
+            movement = od.motion_to_phys(movement)
+            phys_mov_lp.update(time.time(), movement)
             # action = (movement, 0)  # TODO lever
 
             # # step

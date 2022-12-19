@@ -173,13 +173,14 @@ class OmniDrive:
             print(f'Highest absolute velocity cannot be over 1.0: {highest_abs_v}!', file=sys.stderr)
 
         # flip forward-backward
+        drive_v = np.array(drive_v)  # cpy first
         drive_v[0] = -1 * drive_v[0]
 
         # translate wheel_v to ignore low pwms that would not move the ball: [0,1] -> [min_pwm,1]
         # leave 0s as 0s tho
         abs_drive_v = np.abs(drive_v)
         abs_drive_v = (self.pwm_to_motion_min_pwm + abs_drive_v * (1. - self.pwm_to_motion_min_pwm)) * (abs_drive_v > 0)
-        drive_v = abs_drive_v * ((drive_v > 0) * 2 - 1)  # +-
+        drive_v = abs_drive_v * np.sign(drive_v)  # +-
 
         wheel_v = np.matmul(self.trans_mx, drive_v.transpose())
         wheel_v_normed = wheel_v / np.abs(wheel_v).max() * highest_abs_v  # normalize then scale back to requested velocity
@@ -343,13 +344,13 @@ class OmniDrive:
         flo = MotionSensors(flo1, flo2)
         drive_t = 5
         niter = 50
-        speed = .8
+        speed = 0.9  # TODO lower maybe when motors work fine
         dirs_to_try = ['forward', 'backward', 'left_strafe', 'right_strafe', 'left_turn', 'right_turn']
 
         # setup nn
         trans = omni_transfer_opt.OmniTransferOpt(self.def_d)
         loss = torch.nn.MSELoss()
-        opt = torch.optim.SGD(trans.parameters(), lr=0.05)
+        opt = torch.optim.SGD(trans.parameters(), lr=0.01)
         errs = []
         trans_mxs = []
 
@@ -364,6 +365,7 @@ class OmniDrive:
             for dir_i, dir_ in enumerate(dirs_to_try):
 
                 drive_v = self.simple_dirs_v[dir_] * speed
+                print(f'go {dir_} at {drive_v}')
                 wheel_dir, wheel_dc, wheel_v, wheel_v_normed = self.calc_wheel_v(drive_v, ret_wheel_v=True)
                 wheel_vs.append(wheel_v)
 
@@ -380,6 +382,15 @@ class OmniDrive:
             actual_motion = torch.reshape(torch.tensor(actual_motion, dtype=torch.float32), (len(dirs_to_try), OmniDrive.AXES, 1))
             wheel_vs = torch.reshape(torch.tensor(np.array(wheel_vs), dtype=torch.float32), (len(dirs_to_try), 3, 1))
             expected_motion = trans(wheel_vs)
+            expected_motion[:, [0, 1], :] *= -1  # front-back, and left-right strafe are flipped
+
+            print('WHEEL_VS')
+            print(torch.round(wheel_vs, decimals=2))
+            print('MOTION')
+            print(torch.round(actual_motion, decimals=2))
+            print('EXPECTED MOTION')
+            print(torch.round(expected_motion, decimals=2))
+
             err = loss(expected_motion, actual_motion)
             print(f'loss: {err.item():.3f}')
             errs.append(err.item())
@@ -804,7 +815,7 @@ def main():
         man_drive(speed, calibration_path)  # TODO add calibration file path (optional)
     elif function == 'calib':
         calibration_path = sys.argv[2]  # omni_calib.pckl
-        cm_per_game_dist_unit = float(sys.argv[3])  # 3.81
+        cm_per_game_dist_unit = float(sys.argv[3])  # 3.81 for DOOM
         calibrate(calibration_path, cm_per_game_dist_unit=cm_per_game_dist_unit)
     elif function == 'test':
         calibration_path = sys.argv[2] if len(sys.argv) > 2 else None
