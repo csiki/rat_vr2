@@ -71,8 +71,6 @@ if __name__ == '__main__':
     # pc/server address
     host, port = '192.168.0.129', 4444  # TODO as cmd argument
 
-    # TODO run doom in no window mode
-
     with ServerSocket(host, port) as conn:
 
         # setup VR
@@ -94,15 +92,18 @@ if __name__ == '__main__':
         # rew = PiRewardCircuit(conn, 'SERIAL_PORT_ON_PI')  # TODO serial port
         # TODO lever
 
-        # setup game
-        # doom = DOOM('doom/scenarios/arena_lowered.wad', 'map01')
-        game_over = False
-
+        # setup live plots
         mov_1_lp = LiveLinePlot(nplots=2, ylim=(-1500, 1500), title='mov1')
         mov_2_lp = LiveLinePlot(nplots=2, ylim=(-1500, 1500), title='mov2')
         smooth_mov_lp = LiveLinePlot(nplots=3, ylim=(-1200, 1200), title='smooth')
         phys_mov_lp = LiveLinePlot(nplots=3, ylim=(-100, 100), title='phys')
-        # TODO track pm as well
+        player_pos_lp = LiveLinePlot(nplots=3, ylim=(-100, 100), title='player pos')
+        player_vel_lp = LiveLinePlot(nplots=3, ylim=(-100, 100), title='player vel')
+
+        # setup game
+        cfg_update = {'win_visible': False}
+        doom = DOOM('doom/scenarios/arena_lowered.wad', 'map01', cfg_update)
+        game_over = False
 
         while not game_over:
 
@@ -117,19 +118,22 @@ if __name__ == '__main__':
             mov1 = smooth_flo1.get_vel()
             mov2 = smooth_flo2.get_vel()
 
-            # plots
-            mov_1_lp.update(time.time(), mov1)
-            mov_2_lp.update(time.time(), mov2)
-            smooth_mov_lp.update(time.time(), movement)
-
             movement = od.motion_to_phys(movement)
             phys_mov_lp.update(time.time(), movement)
-            # action = (movement, 0)  # TODO lever
+            action = (movement, 0)  # TODO lever
 
-            # # step
-            # state, reward, terminated, truncated, info = doom.step(action)
-            # game_over = terminated or truncated
-            # pm.loop(pos=np.array([state.position_x, state.position_y]),
-            #         vel=np.array([state.velocity_x, state.velocity_y]))
+            # step
+            state, reward, terminated, truncated, info = doom.step(action)
+            game_over = terminated or truncated
+            pm.loop(pos=np.array([state.position_x, state.position_y]),
+                    vel=np.array([state.velocity_x, state.velocity_y]))
+
+            # update plots
+            t = time.time()
+            mov_1_lp.update(t, mov1)
+            mov_2_lp.update(t, mov2)
+            smooth_mov_lp.update(t, movement)
+            player_pos_lp.update(t, pm.pos)
+            player_vel_lp.update(t, pm.vel)
 
         # cleanup happens on device automatically

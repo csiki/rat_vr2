@@ -50,16 +50,16 @@ class OmniDrive:
         self.pwm_to_motion_p = np.stack([np.ones(OmniDrive.AXES), np.zeros(OmniDrive.AXES)], axis=1)  # lin fun
         self.pwm_to_motion_scaler = np.ones(OmniDrive.AXES)  # scaler to translate motion/sec; no bias like above here
         self.pwm_to_motion_min_pwm = np.zeros(OmniDrive.AXES)
+
         # TODO last calibration:
-        #   pwm_to_motion_min_pwm: [0.55, 0.75, 0.6]
-        #   pwm_to_motion_p: [[9532.5447591, -3798.82920069], [21748.57643458, -15016.18802188], [13136.44569683, -6056.54212003]]
-        #   pwm_to_motion_scaler: [4123.62066589, 4261.17269823, 5083.19382685]
-        self.pwm_to_motion_min_pwm = np.array([0.55, 0.75, 0.6])
-        self.pwm_to_motion_p = np.array([[9532.5447591, -3798.82920069], [21748.57643458, -15016.18802188], [13136.44569683, -6056.54212003]])
-        self.pwm_to_motion_scaler = np.array([4123.62066589, 4261.17269823, 5083.19382685])
+        self.pwm_to_motion_min_pwm = np.array([0.4, 0.6, 0.3])
+        self.pwm_to_motion_p = np.array([[10652.57, -3037.57], [13279.69, -5839.49], [8550.87, -545.12]])
+        self.pwm_to_motion_scaler = np.array([5795.90, 5714.26, 7259.36])
 
         self.motion_per_rad = None  # amount of motion detected for 1 rad turn
         self.motion_per_cm = None  # same but in cms (measured only for turn, but should generalize)
+        # motion_per_rad: 150.2422662787492
+        # motion_per_cm: 7.51211331393746
         self.drive_2_game_vel = [None, None, None]  # for each axis
         self.drive_2_game_acc = [None, None, None]  # how drive speed translates to in-game acceleration
 
@@ -75,11 +75,6 @@ class OmniDrive:
              [0, -1, self.def_d],
              [np.sin(np.pi / 3), np.cos(np.pi / 3), self.def_d]]
         )
-        # TODO last calibration best:
-        # self.trans_mx = np.array(
-        #     [[ 9.608279,    0.7030483,   0.19814108],
-        #      [-0.17366488, -1.2253994,   0.16833168],
-        #      [-9.72685,     0.5778875,   0.13894492]])
 
         self.roller_pins = roller_pins
         self.pwm_freq = pwm_freq
@@ -434,7 +429,7 @@ class OmniDrive:
             print(f'{nrep} x direction:', dir_)
             for _ in range(nrep):
                 for pwm in pwms_to_try:
-                    print(f'pwm: {pwm:.2f}')
+                    print(f'pwm: {pwm:.2f} ...', end=' ', flush=True)
 
                     drive_v = self.simple_dirs_v[dir_] * pwm
                     wheel_dir, wheel_dc = self.calc_wheel_v(drive_v)
@@ -447,24 +442,25 @@ class OmniDrive:
                     flo.loop()
                     motion = flo.get_rel_motion()
                     motions.append(motion)
+                    print(f'motion: {motion}', end='\n')
 
         # establish pwm to motion velocity function for each axis
         #   do scipy function fitting for each axis
         drive_vs = np.abs(np.array(drive_vs))  # abs: direction agnostic within axis
         motions = np.abs(np.array(motions))  # same
-        axes = np.argmax(np.abs(drive_vs), axis=1)
+        dom_axes = np.argmax(np.abs(drive_vs), axis=1)  # dominant axis of driving
 
         # experimentally: anything below 500 motion is noise; the function of drive to motion looks like a ReLU;
         #   find highest drive_vs where the motion is close to 0, i.e. <500, call it low_end
         #   from low_end to max(drive_vs) fit a linear function;
         #   don't drive wheels below a drive of low_end --> scale drive_vs of [0,1] to [low_end, 1] later
-        noise_motion = 500
         print('pwm to motion:')
         for axis in range(OmniDrive.AXES):
 
-            dv = drive_vs[axes == axis, axis]  # pwms (see scaling above)
-            mv = motions[axes == axis, axis] / drive_t  # motion/sec
-            print(f'AXIS {axis}:\n\tdv: {dv.tolist()}\n\tmv: {mv.tolist()}')
+            dv = drive_vs[dom_axes == axis, axis]  # pwms (see scaling above)
+            mv = motions[dom_axes == axis, axis] / drive_t  # motion/sec
+            noise_motion = motions[dom_axes != axis, axis].mean()  # noise floor for motion
+            print(f'AXIS {axis}:\n\tdv: {dv.tolist()}\n\tmv: {mv.tolist()}\n\tnoise: {noise_motion:.02f}')
 
             # find low_end for each direction in an axis
             dv1, dv2 = dv[:len(dv) // 2], dv[len(dv) // 2:]
@@ -494,7 +490,7 @@ class OmniDrive:
         # defines motion to angle (rad) transfer function
         print('Press the \'right\' key until a full rotation occurs; press \'left\' to correct; press Esc to finish')
 
-        drive_v = 1.  # TODO not enough V going to motors ???
+        drive_v = 0.75
         nruns = 5
 
         flo1 = MotionSensor(**FRONT_MOTION_PARAMS)
@@ -679,10 +675,10 @@ def calibrate(calibration_path, **calib_kwargs):  # TODO argparsed input from ma
     signal.signal(signal.SIGINT, exit_code)
 
     # calibrate
-    print('Calibrate transfer function..')
-    omni_drive.calibrate_transfer_fun()
-    print('Calibrate speed..')
-    omni_drive.calibrate_speed()
+    # print('Calibrate transfer function..')
+    # omni_drive.calibrate_transfer_fun()  # TODO
+    # print('Calibrate speed..')
+    # omni_drive.calibrate_speed()
     print('Calibrate full rotation..')
     omni_drive.calibrate_full_rot(ball_r=20)
     # omni_drive.calibrate_game_movement()  # results of this step is not yet used + it needs game to run
