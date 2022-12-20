@@ -382,14 +382,14 @@ class OmniDrive:
             actual_motion = torch.reshape(torch.tensor(actual_motion, dtype=torch.float32), (len(dirs_to_try), OmniDrive.AXES, 1))
             wheel_vs = torch.reshape(torch.tensor(np.array(wheel_vs), dtype=torch.float32), (len(dirs_to_try), 3, 1))
             expected_motion = trans(wheel_vs)
-            expected_motion[:, [0, 1], :] *= -1  # front-back, and left-right strafe are flipped
+            expected_motion[:, 0, :] *= -1  # front-back, and left-right strafe are flipped
 
             print('WHEEL_VS')
-            print(torch.round(wheel_vs, decimals=2))
+            print(torch.round(wheel_vs[..., 0], decimals=2))
             print('MOTION')
-            print(torch.round(actual_motion, decimals=2))
+            print(torch.round(actual_motion[..., 0], decimals=2))
             print('EXPECTED MOTION')
-            print(torch.round(expected_motion, decimals=2))
+            print(torch.round(expected_motion[..., 0], decimals=2))
 
             err = loss(expected_motion, actual_motion)
             print(f'loss: {err.item():.3f}')
@@ -762,20 +762,26 @@ def man_drive(speed, calibration_path):
     omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4, calib_path=calibration_path)
     omni_drive.setup()
 
+    flo1 = MotionSensor(**FRONT_MOTION_PARAMS)
+    flo2 = MotionSensor(**SIDE_MOTION_PARAMS)
+    flo = MotionSensors(flo1, flo2)
+
     def exit_code(*args):
         omni_drive.cleanup()
         exit(0)
 
     signal.signal(signal.SIGINT, exit_code)
 
-    class _key_listener:
+    class _man_drive_key_listener:
         key_mapping = {'up': 'forward', 'down': 'backward', 'right': 'right_strafe', 'left': 'left_strafe',
                        'w': 'forward', 's': 'backward', 'd': 'right_strafe', 'a': 'left_strafe',
                        'k': 'left_turn', 'l': 'right_turn'}
 
         def _press(self, key):
             if key in self.key_mapping:
-                print('DRIVE..', end='', flush=True)
+                flo.loop()
+                flo.get_rel_motion()
+                print(f'DRIVE {self.key_mapping[key]}..', end='', flush=True)
                 self.current_dir += omni_drive.simple_dirs_v[self.key_mapping[key]]
                 wheel_dir, wheel_dc = omni_drive.calc_wheel_v(self.current_dir * speed)
                 omni_drive.drive(wheel_dir, wheel_dc)
@@ -787,8 +793,10 @@ def man_drive(speed, calibration_path):
                     wheel_dir, wheel_dc = omni_drive.calc_wheel_v(self.current_dir * speed)
                     omni_drive.drive(wheel_dir, wheel_dc)
                 else:
-                    print('STOP', end='\n')
                     omni_drive.stop()
+                    flo.loop()
+                    rel_mot = flo.get_rel_motion()
+                    print(f'STOP after motion of {[int(m) for m in rel_mot]}', end='\n')
 
         def __init__(self):
             self.current_dir = np.zeros(3)
@@ -798,7 +806,7 @@ def man_drive(speed, calibration_path):
                 on_release=self._release,
             )
 
-    _key_listener()
+    _man_drive_key_listener()
     omni_drive.cleanup()
 
 

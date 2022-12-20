@@ -71,6 +71,8 @@ if __name__ == '__main__':
     # pc/server address
     host, port = '192.168.0.129', 4444  # TODO as cmd argument
 
+    # TODO run doom in no window mode
+
     with ServerSocket(host, port) as conn:
 
         # setup VR
