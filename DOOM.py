@@ -22,6 +22,7 @@ class DOOM(gym.Env):
     DEFAULT_CFG = {
         'res': ScreenResolution.RES_1920X1080,
         'win_visible': True,
+        'fullscreen': True,
         'render_hud': False,
         'automap': False,
         'buttons': [Button.MOVE_FORWARD_BACKWARD_DELTA, Button.MOVE_LEFT_RIGHT_DELTA, Button.TURN_LEFT_RIGHT_DELTA,
@@ -75,7 +76,7 @@ class DOOM(gym.Env):
         self.game.set_screen_format(ScreenFormat.RGB24)
         self.game.set_render_hud(self.cfg['render_hud'])
         # self.game.add_game_args("-width 3440 -height 1440")  # -record recordings
-        self.game.add_game_args("+fullscreen 1 +viz_nocheat 0")
+        self.game.add_game_args(f'+fullscreen 1 +viz_nocheat 0 +fullscreen {[0, 1][self.cfg["fullscreen"]]}')
         # self.game.add_game_args('+snd_mididevice -1 +snd_midipatchset /media/viktor/OS/csiki/rats_play_doom/doom/gm.dls')
         self.game.set_sound_enabled(True)  # TODO crashes because of old 1.19 openal version that sticks to vizdoom somewhow
 
@@ -121,8 +122,8 @@ class DOOM(gym.Env):
         #   max speed originally is 30 mu/tic
         self.tic_per_sec = 35.
         self.map_unit_per_cm = 8. / 30.48
-        self.map_degree_per_rad = 0.5 / np.pi
-        move_speed_rng = self.cfg['max_player_speed'] / self.tic_per_sec * self.map_unit_per_cm  # map_unit / tic
+        self.map_degree_per_rad = 50 / np.pi  # TODO possibly need to implement in-game calibration too
+        move_speed_rng = self.cfg['max_player_speed'] #/ self.tic_per_sec * self.map_unit_per_cm  # map_unit / tic
         move_turn_rng = (-0.5, 0.5)  # game degree in [0, 1]
         move_space = gym.spaces.Box(low=np.array([-move_speed_rng, -move_speed_rng, move_turn_rng[0]]),
                                     high=np.array([move_speed_rng, move_speed_rng, move_turn_rng[1]]))
@@ -149,8 +150,8 @@ class DOOM(gym.Env):
         step_start = time.time()
 
         # action
-        move, shoot = action
-        move[:2] = move[:2] / self.tic_per_sec * self.map_unit_per_cm  # TODO !this made it too slow! todo * self.cfg['skiprate'] ?
+        move, shoot = np.array(action[0]), action[1]  # cpy move before altered
+        move[:2] = move[:2] / self.map_unit_per_cm   # / self.tic_per_sec * self.map_unit_per_cm  # TODO !this made it too slow! todo * self.cfg['skiprate'] ?
         move[2] = move[2] * self.map_degree_per_rad  # TODO !this made it too slow!
         reward = self.game.make_action(move.tolist() + [shoot], self.cfg['skiprate'])
 
@@ -173,7 +174,7 @@ class DOOM(gym.Env):
         finished = self.game.is_episode_finished()
         return state, reward, state.dead, game_over or finished and not state.dead, \
                {'i': self.step_i, 'step_t': (step_over - step_start) * 1000,
-                'bump_angle': b_angle, 'bump_distance': b_distance}
+                'bump_angle': b_angle, 'bump_distance': b_distance, 'ingame_mov': move}
 
     def render(self) -> Optional[Union[RenderFrame, List[RenderFrame]]]:
         pass

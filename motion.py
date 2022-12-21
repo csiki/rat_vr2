@@ -125,9 +125,10 @@ class MotionSensors:  # 3 degrees of freedom
 
 
 class SmoothMotion:  # MotionSensor wrapper
-    def __init__(self, flo: Union[MotionSensor, MotionSensors], smooth_dt):
+    def __init__(self, flo: Union[MotionSensor, MotionSensors], smooth_dt, threshold=np.inf):
         self.flo = flo
         self.smooth_dt = smooth_dt
+        self.threshold = threshold  # ignore and zero out anything below
 
         self._rel_mots = deque()
         self._dts = deque()
@@ -159,17 +160,15 @@ class SmoothMotion:  # MotionSensor wrapper
 
         rel_mots = np.asarray(self._rel_mots)  # (time, axes)
         dts = np.asarray(self._dts)  # example: 3, 2, 3, 1, 1
-        # print(dts.shape)
 
         # in the time window given, weights recordings with longer dt higher
         # print(np.concatenate([dts[..., None], rel_mots], axis=1))
         smooth_rel_mot = (rel_mots * self.smoothing(dts)[:, None]).sum(axis=0)
-
         while np.abs(self._dts).sum() > self.smooth_dt * 4:  # have some cushion
             self._rel_mots.popleft()
             self._dts.popleft()
 
-        smooth_rel_mot[np.isnan(smooth_rel_mot)] = 0.
+        smooth_rel_mot[(np.isnan(smooth_rel_mot)) | (np.abs(smooth_rel_mot) < self.threshold)] = 0.
         return smooth_rel_mot.astype(np.float32)
 
 

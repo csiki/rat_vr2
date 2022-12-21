@@ -8,14 +8,11 @@ from collections import deque
 class PlayerMovement:  # in-game movement tracking
 
     MIN_HISTORY = 6
-    HISTORY_SIZE = 100
+    HISTORY_SIZE = 500
     SMOOTH_DT = -.1  # sec; < 0
     AXES = 3
 
-    def __init__(self, do_calc_vel: bool = False, do_calc_acc: bool = False,
-                 hist_size: int = HISTORY_SIZE, smooth_dt: float = SMOOTH_DT):
-        self.do_calc_vel = do_calc_vel
-        self.do_calc_acc = do_calc_acc
+    def __init__(self, hist_size: int = HISTORY_SIZE, smooth_dt: float = SMOOTH_DT):
 
         # poll these to get curr val
         self.pos = np.zeros(PlayerMovement.AXES)
@@ -29,43 +26,45 @@ class PlayerMovement:  # in-game movement tracking
             within_t = past - smooth_dt  # smooth_dt = 6; 4, 1, -1, -4, -5
             t_occupied = np.clip(dts - within_t, 0, None)  # 0, 1, 4, 5, 6
             t_occupied = np.min([t_occupied, dts], axis=0)  # 0, 1, 3, 1, 1
-            weight = t_occupied / t_occupied.sum()  # normalize
+            weight = t_occupied / max(1e-4, t_occupied.sum())  # normalize, avoid nans
             return weight
 
-        self.calc_some = do_calc_vel is None or do_calc_acc is None
         self.smoothing = _smoothing
         self._ts = deque(maxlen=hist_size)  # time points and..
         self._ps = deque(maxlen=hist_size)  # positions to calc vel/acc
 
-    def loop(self, pos: np.ndarray, vel: np.ndarray = None, acc: np.ndarray = None):
+    def loop(self, pos: np.ndarray, vel: np.ndarray = np.empty(0), acc: np.ndarray = np.empty(0)):
         tnow = time.time()
         self.pos = self._reg_pos(pos, tnow)  # in-game position (x, y, angle); angle in rad
-        self.vel = vel if vel is not None else self._calc_vel(tnow)  # in-game velocity (x/s, y/s, angle/s)
-        self.acc = acc if acc is not None else self._calc_acc(tnow)  # in-game acceleration (x/s^2, y/s^2, angle/s^2)
+
+        # the last elements of velocity and acceleration are partially calculated if not provided
+        #   e.g. for DOOM angle velocity cannot be read from game variables (easy)
+        self.vel[:vel.size] = vel  # in-game velocity (x/s, y/s, angle/s)
+        self.vel[vel.size:] = self._calc_vel(tnow)[vel.size:] if vel.size < PlayerMovement.AXES else []
+        self.acc[:acc.size] = acc  # in-game acceleration (x/s^2, y/s^2, angle/s^2)
+        self.acc[acc.size:] = self._calc_acc(tnow)[acc.size:] if acc.size < PlayerMovement.AXES else []
 
     def _reg_pos(self, p: np.ndarray, tnow: float):
-        if self.calc_some:
-            self._ts.append(tnow)
-            self._ps.append(p)
+        self._ts.append(tnow)
+        self._ps.append(p)
         return p
 
     def _calc_vel(self, tnow: float):  # in-case get_vel is not available
         if len(self._ts) < PlayerMovement.MIN_HISTORY:  # not enough
-            return np.zeros(3)
+            return np.zeros(PlayerMovement.AXES)
 
-        ts = np.array(self._ts)
-        dts = np.diff(ts)
-        dps = np.diff(np.array(self._ps))
-        return self.smoothing(dts) * dps / dts
+        dts = np.diff(np.array(self._ts))
+        dps = np.diff(np.array(self._ps), axis=0)
+        return (self.smoothing(dts)[:, None] * dps / dts[:, None]).mean(axis=0)
 
     def _calc_acc(self, tnow):
         if len(self._ts) < PlayerMovement.MIN_HISTORY:  # not enough
-            return np.zeros(3)
+            return np.zeros(PlayerMovement.AXES)
 
         ts = np.array(self._ts)
         dts = np.diff(ts)
-        dps = np.diff(np.array(self._ps))
-        return self.smoothing(ts[2:] - tnow) * np.diff(dps) / dts[1:]
+        dps = np.diff(np.array(self._ps), axis=0)
+        return (self.smoothing(dts[1:])[:, None] * np.diff(dps, axis=0) / dts[1:, None]).mean(axis=0)
 
 
 class Feedback:

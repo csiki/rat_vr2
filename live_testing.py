@@ -3,6 +3,7 @@ import numpy as np
 from datetime import datetime
 import queue
 import asyncio
+from collections import deque
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -20,15 +21,21 @@ from config import *
 from pi_wrapper import PiSmoothMotion, PiMotionSensor, PiMotionSensors, PiOmniDrive, PiFeedback, \
     PiPlayerMovement, ServerSocket, PiRewardCircuit
 from DOOM import DOOM
+from vizdoom import ScreenResolution
 
 
 class LiveLinePlot:
     # https://matplotlib.org/stable/tutorials/advanced/blitting.html
 
-    def __init__(self, nplots=1, xlim=(-10, 0), ylim=(-1, 1), title='', xlabel='', ylabel=''):
+    def __init__(self, nplots=1, update_freq=1, xlim=(-10, 0), ylim=(-1, 1), title='', xlabel='', ylabel=''):
+        self.update_freq = update_freq
+        self.it = np.random.randint(0, 100)  # live plots will not as likely be updated in sync if update_freq > 1
+
+        assert xlim[0] < 0  # x is time in the past within (-inf, 0]
+
         self.xlim = xlim
         self.ylim = ylim
-        self.xdata, self.ydata = [], [[] for _ in range(nplots)]
+        self.xdata, self.ydata = deque(), [deque() for _ in range(nplots)]
 
         self.fig, self.ax = plt.subplots(1, 1)
         cols = [c for c in matplotlib.colors.ColorConverter.colors.keys() if len(c) == 1]
@@ -53,8 +60,18 @@ class LiveLinePlot:
         for i, y in enumerate(ys):
             self.ydata[i].append(y)
 
+        self.it += 1
+        if self.it % self.update_freq != 0:
+            return
+
         xdata = np.asarray(self.xdata)
-        xdata -= xdata[-1]
+        xdata -= xdata[-1]  # last record to front
+
+        too_far_in_the_past = np.cumsum(np.asarray(self.xdata)[::-1])[::-1] < self.xlim[-1] * 2
+        for _ in range(too_far_in_the_past.sum()):
+            self.xdata.popleft()
+            for y in self.ydata:
+                y.popleft()
 
         self.fig.canvas.restore_region(self.bg)
         for i, ln in enumerate(self.lns):
@@ -78,11 +95,11 @@ if __name__ == '__main__':
         flo2 = PiMotionSensor(conn, **SIDE_MOTION_PARAMS)
         flo = PiMotionSensors(conn, flo1, flo2)
 
-        smooth_flo1 = PiSmoothMotion(conn, flo1, 0.1)
-        smooth_flo2 = PiSmoothMotion(conn, flo2, 0.1)
-        smooth_flo = PiSmoothMotion(conn, flo, 0.1)
+        # smooth_flo1 = PiSmoothMotion(conn, flo1, 0.1)
+        # smooth_flo2 = PiSmoothMotion(conn, flo2, 0.1)
+        smooth_flo = PiSmoothMotion(conn, flo, 0.1, 100)
 
-        pm = PlayerMovement(do_calc_acc=True)
+        pm = PlayerMovement(smooth_dt=.3)
 
         calibration_path = 'omni_calib.pckl'
         od = PiOmniDrive(conn, mount_tracking=False, calib_path=calibration_path)  # TODO mount_tracking=True
@@ -93,15 +110,17 @@ if __name__ == '__main__':
         # TODO lever
 
         # setup live plots
-        mov_1_lp = LiveLinePlot(nplots=2, ylim=(-1500, 1500), title='mov1')
-        mov_2_lp = LiveLinePlot(nplots=2, ylim=(-1500, 1500), title='mov2')
-        smooth_mov_lp = LiveLinePlot(nplots=3, ylim=(-1200, 1200), title='smooth')
-        phys_mov_lp = LiveLinePlot(nplots=3, ylim=(-100, 100), title='phys')
-        player_pos_lp = LiveLinePlot(nplots=3, ylim=(-100, 100), title='player pos')
-        player_vel_lp = LiveLinePlot(nplots=3, ylim=(-100, 100), title='player vel')
+        # mov_1_lp = LiveLinePlot(nplots=2, ylim=(-1500, 1500), title='mov1')
+        # mov_2_lp = LiveLinePlot(nplots=2, ylim=(-1500, 1500), title='mov2')
+        smooth_mov_lp = LiveLinePlot(nplots=3, update_freq=4, ylim=(-1200, 1200), title='smooth mov')
+        phys_mov_lp = LiveLinePlot(nplots=3, update_freq=4, ylim=(-15, 15), title='phys mov')
+        ingame_mov_lp = LiveLinePlot(nplots=3, update_freq=4, ylim=(-15, 15), title='ingame mov')
+        player_pos_lp = LiveLinePlot(nplots=3, update_freq=4, ylim=(-1000, 1000), title='player pos')
+        player_vel_lp = LiveLinePlot(nplots=3, update_freq=4, ylim=(-15, 15), title='player vel')
+        player_acc_lp = LiveLinePlot(nplots=3, update_freq=4, ylim=(-15, 15), title='player acc')
 
         # setup game
-        cfg_update = {'win_visible': False}
+        cfg_update = {'fullscreen': False, 'res': ScreenResolution.RES_640X480}
         doom = DOOM('doom/scenarios/arena_lowered.wad', 'map01', cfg_update)
         game_over = False
 
@@ -110,30 +129,32 @@ if __name__ == '__main__':
             # run VR devices
             od.loop()
             smooth_flo.loop()
-            smooth_flo1.loop()
-            smooth_flo2.loop()
+            # smooth_flo1.loop()
+            # smooth_flo2.loop()
 
             # action
-            movement = smooth_flo.get_vel()
-            mov1 = smooth_flo1.get_vel()
-            mov2 = smooth_flo2.get_vel()
+            mov = smooth_flo.get_vel()
+            # mov1 = smooth_flo1.get_vel()
+            # mov2 = smooth_flo2.get_vel()
 
-            movement = od.motion_to_phys(movement)
-            phys_mov_lp.update(time.time(), movement)
-            action = (movement, 0)  # TODO lever
+            phys_mov = od.motion_to_phys(mov)
+            action = (phys_mov, 0)  # TODO lever
 
             # step
             state, reward, terminated, truncated, info = doom.step(action)
             game_over = terminated or truncated
-            pm.loop(pos=np.array([state.position_x, state.position_y]),
+            pm.loop(pos=np.array([state.position_x, state.position_y, state.angle]),
                     vel=np.array([state.velocity_x, state.velocity_y]))
 
             # update plots
             t = time.time()
-            mov_1_lp.update(t, mov1)
-            mov_2_lp.update(t, mov2)
-            smooth_mov_lp.update(t, movement)
+            # mov_1_lp.update(t, mov1)
+            # mov_2_lp.update(t, mov2)
+            smooth_mov_lp.update(t, mov)
+            phys_mov_lp.update(t, phys_mov)
+            ingame_mov_lp.update(t, info['ingame_mov'])
             player_pos_lp.update(t, pm.pos)
             player_vel_lp.update(t, pm.vel)
+            player_acc_lp.update(t, pm.acc)
 
         # cleanup happens on device automatically

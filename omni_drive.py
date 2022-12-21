@@ -52,6 +52,7 @@ class OmniDrive:
         self.pwm_to_motion_min_pwm = np.zeros(OmniDrive.AXES)
 
         # TODO last calibration:
+        self.noise_floors = np.array([918.89, 2866.23, 1487.46])
         self.pwm_to_motion_min_pwm = np.array([0.4, 0.6, 0.3])
         self.pwm_to_motion_p = np.array([[10652.57, -3037.57], [13279.69, -5839.49], [8550.87, -545.12]])
         self.pwm_to_motion_scaler = np.array([5795.90, 5714.26, 7259.36])
@@ -326,6 +327,7 @@ class OmniDrive:
     def motion_to_phys(self, movement: np.ndarray):
         # scales motion sensor detected movement into physical units (cm and rad)
         # only works properly if calibrate_full_rot() has run i.e. motion_per_rad motion_per_cm are defined
+        movement = np.array(movement)
         movement[:-1] /= self.motion_per_cm  # TODO !made it too slow? also in doom.step()
         movement[-1] /= self.motion_per_rad
         return movement
@@ -481,6 +483,7 @@ class OmniDrive:
 
             self.pwm_to_motion_p[axis, :] = popt
             self.pwm_to_motion_scaler[axis] = np.mean(mvf / dvf)
+            self.noise_floors[axis] = noise_motion
 
         print('pwm_to_motion_min_pwm:', self.pwm_to_motion_min_pwm)
         print('pwm_to_motion_p:', self.pwm_to_motion_p)
@@ -675,13 +678,13 @@ def calibrate(calibration_path, **calib_kwargs):  # TODO argparsed input from ma
     signal.signal(signal.SIGINT, exit_code)
 
     # calibrate
-    # print('Calibrate transfer function..')
-    # omni_drive.calibrate_transfer_fun()  # TODO
-    # print('Calibrate speed..')
-    # omni_drive.calibrate_speed()
+    print('Calibrate transfer function..')
+    omni_drive.calibrate_transfer_fun()  # TODO
+    print('Calibrate speed..')
+    omni_drive.calibrate_speed()
     print('Calibrate full rotation..')
     omni_drive.calibrate_full_rot(ball_r=20)
-    # omni_drive.calibrate_game_movement()  # results of this step is not yet used + it needs game to run
+    # omni_drive.calibrate_game_movement()  # TODO implement !!!!
     print('Calibrate PID parameters..')
     omni_drive.calibrate_pid_params(calib_kwargs['cm_per_game_dist_unit'])
 
@@ -753,14 +756,15 @@ def onmni_test(calibratopn_path=None):
     omni_drive.cleanup()
 
 
-def man_drive(speed, calibration_path):
+def man_drive(speed, calibration_path, check_motion=False):
 
     omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4, calib_path=calibration_path)
     omni_drive.setup()
 
-    flo1 = MotionSensor(**FRONT_MOTION_PARAMS)
-    flo2 = MotionSensor(**SIDE_MOTION_PARAMS)
-    flo = MotionSensors(flo1, flo2)
+    if check_motion:
+        flo1 = MotionSensor(**FRONT_MOTION_PARAMS)
+        flo2 = MotionSensor(**SIDE_MOTION_PARAMS)
+        flo = MotionSensors(flo1, flo2)
 
     def exit_code(*args):
         omni_drive.cleanup()
@@ -775,8 +779,9 @@ def man_drive(speed, calibration_path):
 
         def _press(self, key):
             if key in self.key_mapping:
-                flo.loop()
-                flo.get_rel_motion()
+                if check_motion:
+                    flo.loop()
+                    flo.get_rel_motion()
                 print(f'DRIVE {self.key_mapping[key]}..', end='', flush=True)
                 self.current_dir += omni_drive.simple_dirs_v[self.key_mapping[key]]
                 wheel_dir, wheel_dc = omni_drive.calc_wheel_v(self.current_dir * speed)
@@ -790,8 +795,11 @@ def man_drive(speed, calibration_path):
                     omni_drive.drive(wheel_dir, wheel_dc)
                 else:
                     omni_drive.stop()
-                    flo.loop()
-                    rel_mot = flo.get_rel_motion()
+                    if check_motion:
+                        flo.loop()
+                        rel_mot = flo.get_rel_motion()
+                    else:
+                        rel_mot = []
                     print(f'STOP after motion of {[int(m) for m in rel_mot]}', end='\n')
 
         def __init__(self):
