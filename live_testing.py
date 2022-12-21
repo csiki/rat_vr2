@@ -64,14 +64,18 @@ class LiveLinePlot:
         if self.it % self.update_freq != 0:
             return
 
+        if self.it % 100 == 0:
+            xdata = np.asarray(self.xdata)
+            xdata -= xdata[-1]  # last record to front
+            
+            too_far_in_the_past = np.cumsum(np.asarray(self.xdata)[::-1])[::-1] < self.xlim[-1] * 2
+            for _ in range(too_far_in_the_past.sum()):
+                self.xdata.popleft()
+                for y in self.ydata:
+                    y.popleft()
+
         xdata = np.asarray(self.xdata)
         xdata -= xdata[-1]  # last record to front
-
-        too_far_in_the_past = np.cumsum(np.asarray(self.xdata)[::-1])[::-1] < self.xlim[-1] * 2
-        for _ in range(too_far_in_the_past.sum()):
-            self.xdata.popleft()
-            for y in self.ydata:
-                y.popleft()
 
         self.fig.canvas.restore_region(self.bg)
         for i, ln in enumerate(self.lns):
