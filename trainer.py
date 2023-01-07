@@ -1,13 +1,3 @@
-# TODO first implement ArenaTrainer, then a generalized trainer
-# TODO implement DiscoveryTrainer
-
-# TODO implement it so you can use multiple trainers simultaneously
-# TODO each trainer when trainer.step() is called, pass a flag whether it can start an active training (e.g. rolling) process,
-#   also every trainer returns whether it is currently running active training
-
-# TODO can create a MultiTrainer class that can incorporate any trainers, and their priorities, so if 2 trainers
-#   want to train simultaneously, then one is preferred over the other; also it can weight/sum rewards coming from all...
-import time
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -16,9 +6,16 @@ import vizdoom
 from DOOM import DOOM
 
 
-class ArenaTrainer:
-    def __init__(self, cspace_path=None):
+class Trainer:
+    def __init__(self, cspace_path=None, omni_drive=None):
         self.cspace: nx.Graph = None if cspace_path is None else nx.read_gpickle(cspace_path)
+        self.omni_drive = omni_drive
+
+    def give_reward(self, state):
+        raise NotImplemented
+
+    def enforce_action(self, state):
+        raise NotImplemented
 
     def man_explore_cspace(self, grid_size, wad_path, map_id, cfg_update=None, no_action_limit=50, cspace_path=None):
         cfg_update = {} if cfg_update is None else cfg_update
@@ -100,6 +97,28 @@ class ArenaTrainer:
         start_node = self._closest_grid_node(start_pos)
         end_node = self._closest_grid_node(end_pos)
         return nx.astar_path(self.cspace, start_node, end_node, heuristic=ArenaTrainer._path_plan_dist_heuristic)
+
+
+class ArenaTrainer(Trainer):
+    def __init__(self, cspace_path=None, omni_drive=None):
+        super().__init__(cspace_path, omni_drive)
+
+    def give_reward(self, state):
+        pass  # TODO
+
+    def enforce_action(self, state):
+        pass  # TODO
+
+
+class DiscoveryTrainer(Trainer):
+    def __init__(self, cspace_path=None, omni_drive=None):
+        super().__init__(cspace_path, omni_drive)
+
+    def give_reward(self, state):
+        pass  # TODO
+
+    def enforce_action(self, state):
+        pass  # TODO
 
 
 if __name__ == '__main__':
