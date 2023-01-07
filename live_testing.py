@@ -7,6 +7,7 @@ from collections import deque
 
 import matplotlib
 import matplotlib.pyplot as plt
+import vizdoom
 from matplotlib.animation import FuncAnimation
 
 import socket
@@ -67,7 +68,7 @@ class LiveLinePlot:
         if self.it % 100 == 0:
             xdata = np.asarray(self.xdata)
             xdata -= xdata[-1]  # last record to front
-            
+
             too_far_in_the_past = np.cumsum(np.asarray(self.xdata)[::-1])[::-1] < self.xlim[-1] * 2
             for _ in range(too_far_in_the_past.sum()):
                 self.xdata.popleft()
@@ -124,7 +125,7 @@ if __name__ == '__main__':
         player_acc_lp = LiveLinePlot(nplots=3, update_freq=4, ylim=(-15, 15), title='player acc')
 
         # setup game
-        cfg_update = {'fullscreen': False, 'res': ScreenResolution.RES_640X480}
+        cfg_update = {'fullscreen': False, 'res': ScreenResolution.RES_640X480, 'mode': vizdoom.Mode.SPECTATOR}
         doom = DOOM('doom/scenarios/arena_lowered.wad', 'map01', cfg_update)
         game_over = False
 
@@ -156,7 +157,7 @@ if __name__ == '__main__':
             # mov_2_lp.update(t, mov2)
             smooth_mov_lp.update(t, mov)
             phys_mov_lp.update(t, phys_mov)
-            ingame_mov_lp.update(t, info['ingame_mov'])
+            ingame_mov_lp.update(t, info['action'][:3])
             player_pos_lp.update(t, pm.pos)
             player_vel_lp.update(t, pm.vel)
             player_acc_lp.update(t, pm.acc)

@@ -5,7 +5,7 @@ from collections import namedtuple
 import numpy as np
 import gym
 import vizdoom
-from vizdoom import DoomGame, Button, GameVariable, ScreenFormat, ScreenResolution, AutomapMode
+from vizdoom import DoomGame, Button, GameVariable, ScreenFormat, ScreenResolution, AutomapMode, Mode
 
 
 # TODO minimize sliding:
@@ -20,6 +20,7 @@ from gym.core import RenderFrame, ActType, ObsType
 class DOOM(gym.Env):
 
     DEFAULT_CFG = {
+        'mode': Mode.PLAYER,
         'res': ScreenResolution.RES_1920X1080,
         'win_visible': True,
         'fullscreen': True,
@@ -46,7 +47,7 @@ class DOOM(gym.Env):
         GameVariable.USER5, GameVariable.USER6, GameVariable.USER7,
         GameVariable.AMMO0, GameVariable.AMMO1, GameVariable.AMMO2, GameVariable.AMMO3, GameVariable.AMMO4,
         GameVariable.AMMO5, GameVariable.AMMO6, GameVariable.AMMO7, GameVariable.AMMO8, GameVariable.AMMO9,
-        GameVariable.SELECTED_WEAPON_AMMO
+        GameVariable.SELECTED_WEAPON_AMMO,
     ]
     GAME_VAR_RENAMING = {GameVariable.USER1: 'kill_count', GameVariable.USER2: 'monsters_present',
                          GameVariable.USER3: 'monster_pos_x', GameVariable.USER4: 'monster_pos_y',
@@ -76,7 +77,7 @@ class DOOM(gym.Env):
         self.game.set_screen_format(ScreenFormat.RGB24)
         self.game.set_render_hud(self.cfg['render_hud'])
         # self.game.add_game_args("-width 3440 -height 1440")  # -record recordings
-        self.game.add_game_args(f'+fullscreen 1 +viz_nocheat 0 +fullscreen {[0, 1][self.cfg["fullscreen"]]}')
+        self.game.add_game_args(f'+fullscreen 1 +viz_nocheat 0 +fullscreen {[0, 1][self.cfg["fullscreen"]]} +freelook 1')
         # self.game.add_game_args('+snd_mididevice -1 +snd_midipatchset /media/viktor/OS/csiki/rats_play_doom/doom/gm.dls')
         self.game.set_sound_enabled(True)  # TODO crashes because of old 1.19 openal version that sticks to vizdoom somewhow
 
@@ -90,7 +91,13 @@ class DOOM(gym.Env):
         self.game.set_automap_render_textures(False)
         self.game.set_automap_mode(AutomapMode.OBJECTS_WITH_SIZE)
 
-        buttons = self.cfg['buttons']
+        self.game.set_mode(self.cfg['mode'])
+
+        buttons = set(self.cfg['buttons'])
+        if self.cfg['mode'] == Mode.SPECTATOR:  # add btns for keyboard input to work
+            buttons.update([Button.MOVE_FORWARD, Button.MOVE_BACKWARD, Button.MOVE_RIGHT, Button.MOVE_LEFT,
+                            Button.TURN_LEFT, Button.TURN_RIGHT, Button.STRAFE])
+
         for b in buttons:
             self.game.add_available_button(b)
 
@@ -150,10 +157,18 @@ class DOOM(gym.Env):
         step_start = time.time()
 
         # action
-        move, shoot = np.array(action[0]), action[1]  # cpy move before altered
-        move[:2] = move[:2] / self.map_unit_per_cm   # / self.tic_per_sec * self.map_unit_per_cm  # TODO !this made it too slow! todo * self.cfg['skiprate'] ?
-        move[2] = move[2] * self.map_degree_per_rad  # TODO !this made it too slow!
-        reward = self.game.make_action(move.tolist() + [shoot], self.cfg['skiprate'])
+        if self.cfg['mode'] == Mode.PLAYER:
+            move, shoot = np.array(action[0]), action[1]  # cpy move before altered
+            move[:2] = move[:2] / self.map_unit_per_cm  # / self.tic_per_sec * self.map_unit_per_cm  # TODO !this made it too slow! todo * self.cfg['skiprate'] ?
+            move[2] = move[2] * self.map_degree_per_rad  # TODO !this made it too slow!
+            action = move.tolist() + [shoot]
+            reward = self.game.make_action(action, self.cfg['skiprate'])
+        elif self.cfg['mode'] == Mode.SPECTATOR:
+            self.game.advance_action()
+            action = self.game.get_last_action()
+            reward = self.game.get_last_reward()
+        else:
+            raise NotImplemented('Async modes are not implemented!')
 
         # get state
         state, game_over = self._get_state()
@@ -174,10 +189,10 @@ class DOOM(gym.Env):
         finished = self.game.is_episode_finished()
         return state, reward, state.dead, game_over or finished and not state.dead, \
                {'i': self.step_i, 'step_t': (step_over - step_start) * 1000,
-                'bump_angle': b_angle, 'bump_distance': b_distance, 'ingame_mov': move}
+                'bump_angle': b_angle, 'bump_distance': b_distance, 'action': action}
 
     def render(self) -> Optional[Union[RenderFrame, List[RenderFrame]]]:
-        pass
+        pass  # happens anyway
 
     def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[ObsType, dict]:
         # launch new episode
@@ -196,7 +211,8 @@ class DOOM(gym.Env):
 
 
 def doom_test():
-    doom = DOOM('doom/scenarios/arena_lowered.wad', 'map01')
+    cfg_update = {'mode': Mode.PLAYER}
+    doom = DOOM('doom/scenarios/arena_lowered.wad', 'map01', cfg_update)
     game_over = False
     step_times = []
     step_i = 0
