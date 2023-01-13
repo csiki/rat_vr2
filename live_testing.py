@@ -21,6 +21,7 @@ from config import *
 
 from pi_wrapper import PiSmoothMotion, PiMotionSensor, PiMotionSensors, PiOmniDrive, PiFeedback, \
     PiPlayerMovement, ServerSocket, PiRewardCircuit
+from trainer import ArenaTrainer
 from DOOM import DOOM
 from vizdoom import ScreenResolution
 
@@ -110,6 +111,8 @@ if __name__ == '__main__':
         od = PiOmniDrive(conn, mount_tracking=False, calib_path=calibration_path)  # TODO mount_tracking=True
         od.setup()
         assert od.get('motion_per_cm') is not None and od.get('motion_per_rad') is not None
+
+        trainer = ArenaTrainer(cspace_path='arena_lowered.map01.pckl', omni_drive=od)
 
         # rew = PiRewardCircuit(conn, 'SERIAL_PORT_ON_PI')  # TODO serial port
         # TODO lever

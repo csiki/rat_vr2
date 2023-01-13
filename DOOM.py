@@ -1,6 +1,6 @@
 from typing import Optional, Union, List, Tuple
 import time
-from collections import namedtuple
+from types import SimpleNamespace
 
 import numpy as np
 import gym
@@ -62,8 +62,9 @@ class DOOM(gym.Env):
     def __init__(self, wad_path, map_id, cfg_update=None):
         super().__init__()
 
-        self.game_state_t = namedtuple('game_state_t', [DOOM.GAME_VAR_RENAMING.get(v, str(v)[str(v).find('.') + 1:].lower())
-                                                        for v in DOOM.GAME_VARS])
+        self.game_state_t = SimpleNamespace  # like a namedtuple but mutable
+        self.game_state_t_fields = [DOOM.GAME_VAR_RENAMING.get(v, str(v)[str(v).find('.') + 1:].lower())
+                                    for v in DOOM.GAME_VARS]
 
         self.cfg = DOOM.DEFAULT_CFG
         if cfg_update is not None:  # if cfg is given..
@@ -127,6 +128,7 @@ class DOOM(gym.Env):
         #   8 map units = 1 foot ~= 30 cm
         #   35 tics = 1 sec
         #   max speed originally is 30 mu/tic
+        # TODO use vizdoom.sec_to_doom_tics() and doom_tics_to_sec()
         self.tic_per_sec = 35.
         self.map_unit_per_cm = 8. / 30.48
         self.map_degree_per_rad = 50 / np.pi  # TODO possibly need to implement in-game calibration too
@@ -149,7 +151,11 @@ class DOOM(gym.Env):
         if not game_over:
             self.step_i = state.number
             game_vars = state.game_variables
-            game_state = self.game_state_t(*game_vars)  # cast to namedtuple
+            game_state = self.game_state_t(**{field: val for field, val in zip(self.game_state_t_fields, game_vars)})
+
+            # doom fixed point to python double
+            game_state.monster_pos_x, game_state.monster_pos_y = \
+                map(vizdoom.doom_fixed_to_double, [game_state.monster_pos_x, game_state.monster_pos_y])
 
         return game_state, game_over
 
