@@ -38,7 +38,7 @@ class OmniDrive:
     PWM_2_MOTION_FUN = lambda x, *p: x * p[0] + p[1]  # uses pwm_to_motion_p params for each axis
 
     def __init__(self, roller_pins=ROLLER_PINS, lin_act_pins=LIN_ACT_PINS, up_trans_t=4, down_trans_t=4,
-                 mount_tracking=False, pwm_freq=100, calib_path=None):
+                 auto_mounting=False, pwm_freq=100, calib_path=None):
 
         self.roller_dirs = np.array(['left', 'right'])
         self.simple_dirs_v = {'forward': [1., 0., 0.], 'backward': [-1., 0., 0.],  # v, vn, w
@@ -83,12 +83,13 @@ class OmniDrive:
 
         self.up_trans_t = up_trans_t
         self.down_trans_t = down_trans_t
-        self.mount_tracking = mount_tracking
+        self.auto_mounting = auto_mounting
         self.mounted = None
 
         self.driving = False
         self.rolling = False
         self.roll_fun: Callable[[OmniDrive], Any] = lambda x: None
+        self.current_drive_v: np.ndarray = np.zeros(OmniDrive.AXES)
         self.scheduler = sched.scheduler(time.time, time.sleep)
 
         self.lin_act = LinActuator(lin_act_pins)
@@ -127,10 +128,10 @@ class OmniDrive:
         self.lin_act.setup()
         print('OmniDrive setup done')
 
-        if self.mount_tracking:  # start in a non-mounted = rat movement position
-            self.mount(blocking=True)
+        if self.auto_mounting:  # start in unmounted = rat movement position
+            self.mount(blocking=True)  # make sure the structure won't be raised out-of-bounds
             self.letgo(blocking=True)
-            self.mounted = False
+        self.mounted = False
 
     def save(self, calib_path):  # TODO use get and setattr; this is ugly
         calib = {'noise_floors': self.noise_floors, 'pwm_to_motion_p': self.pwm_to_motion_p,
@@ -146,19 +147,23 @@ class OmniDrive:
         self.mounted = mounted
 
     def mount(self, blocking=False, callback=None):
+        if self.mounted:
+            return
         self.lin_act.drive('down', self.down_trans_t, blocking=blocking)
         if blocking:
             self.mounted = True
-        elif self.mount_tracking:
+        else:
             self.scheduler.enter(self.down_trans_t, 1, self._set_mount_pos, kwargs={'mounted': True})
         if callback is not None:
             self.scheduler.enter(self.down_trans_t, 2, callback)
 
     def letgo(self, blocking=False, callback=None):
+        if not self.mounted:
+            return
         self.lin_act.drive('up', self.up_trans_t, blocking=blocking)
         if blocking:
             self.mounted = False
-        elif self.mount_tracking:
+        else:
             self.scheduler.enter(self.up_trans_t, 1, self._set_mount_pos, kwargs={'mounted': False})
         if callback is not None:
             self.scheduler.enter(self.up_trans_t, 2, callback)
@@ -189,7 +194,7 @@ class OmniDrive:
         return wheel_dir, wheel_dc
 
     def drive(self, wheel_dir, wheel_dc, t=None, blocking=False, unmount=False, callback=None):
-        if self.mount_tracking and not self.mounted:
+        if self.auto_mounting and not self.mounted:
             self.mount()
 
         if self.driving or self.rolling:
@@ -233,10 +238,10 @@ class OmniDrive:
 
         drive_v = self.simple_dirs_v[simple_dir] * speed
         wheel_dir, wheel_dc = self.calc_wheel_v(drive_v)
+        self.current_drive_v = drive_v
         return self.drive(wheel_dir, wheel_dc, t, blocking, unmount, callback)
 
-    def roll(self, feedback: Feedback, eps: float, blocking=False, unmount=False,
-             callback: Callable[[], Any] = None):
+    def roll(self, feedback: Feedback, eps: float, blocking=False, unmount=False, callback: Callable[[], Any] = None):
         # performs movement on all three axis according to feedback using 1 pid controller per axis
         # if no blocking, main functionality is run in loop(), only the function to run in there is defined here + setup
         # overall dynamics:
@@ -270,6 +275,7 @@ class OmniDrive:
                 drive_v = np.array([pid(neg_err[axes]) for axes, pid in enumerate(pids)])
                 wheel_dir, wheel_dc = self.calc_wheel_v(drive_v)
                 self.drive(wheel_dir, wheel_dc)
+                self.current_drive_v = drive_v
 
             self.stop(unmount)
             if callback:
@@ -279,21 +285,21 @@ class OmniDrive:
 
         # not blocking
         # set up function to run in loop that returns drive_v
-        def _roll_fun():
+        def _roll_fun(od: OmniDrive):
             neg_err = -feedback()  # the negative error, which enables the constant 0 setpoint
 
             # when done
-            if np.abs(np.max(neg_err)) < eps or not self.rolling:
-                self.stop(unmount)  # self.rolling -> False  # TODO see if self is actually seen here
+            if np.abs(np.max(neg_err)) < eps or not od.rolling:  # TODO should angle be handled differently or always used as degree not radian at least..
+                od.stop(unmount)  # od.rolling -> False  # TODO see if od is actually seen here as outer self
                 if callback:
                     callback()
                 return
 
             # roll on
             drive_v = np.array([pid(neg_err[axes]) for axes, pid in enumerate(pids)])
-            wheel_dir, wheel_dc = self.calc_wheel_v(drive_v)
-            self.drive(wheel_dir, wheel_dc)
-            return
+            wheel_dir, wheel_dc = od.calc_wheel_v(drive_v)
+            od.drive(wheel_dir, wheel_dc)
+            od.current_drive_v = drive_v
 
         self.roll_fun = _roll_fun
         self.rolling = True
@@ -307,8 +313,9 @@ class OmniDrive:
 
         self.driving = False
         self.rolling = False
+        self.current_drive_v = np.zeros(OmniDrive.AXES)
 
-        if unmount and self.mount_tracking and self.mounted:
+        if unmount and self.auto_mounting and self.mounted:
             self.letgo()
 
     def loop(self):
@@ -319,7 +326,7 @@ class OmniDrive:
             self.roll_fun(self)
 
     def cleanup(self):
-        self.stop(unmount=self.mount_tracking)
+        self.stop(unmount=self.auto_mounting)
         self.lin_act.cleanup(gpio_cleanup=False)
         GPIO.cleanup()
         print('OmniDrive cleanup done')
@@ -803,7 +810,7 @@ def man_drive(speed, calibration_path, check_motion=False):
                     print(f'STOP after motion of {[int(m) for m in rel_mot]}', end='\n')
 
         def __init__(self):
-            self.current_dir = np.zeros(3)
+            self.current_dir = np.zeros(OmniDrive.AXES)
             print('Press Esc to quit, or up, down, left, right, K, or L to roll the ball..')
             sshkeyboard.listen_keyboard(
                 on_press=self._press,

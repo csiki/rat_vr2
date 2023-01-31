@@ -54,11 +54,6 @@ class DOOM(gym.Env):
                          GameVariable.USER5: 'monsters_spawned', GameVariable.USER6: 'monsters_removed',
                          GameVariable.USER7: 'wall_bump_angle'}
 
-    # named tuple, with names derived by lower casing game var names
-    # use GAME_VAR_RENAMING if possible
-    # GAME_STATE_T = namedtuple('game_state_t', [GAME_VAR_RENAMING.get(v, str(v)[str(v).find('.') + 1:].lower())
-    #                                            for v in GAME_VARS])  # TODO can't do this here in py3
-
     def __init__(self, wad_path, map_id, cfg_update=None):
         super().__init__()
 

@@ -1,13 +1,18 @@
+import time
 
+from typing import Callable, Any, Union, Tuple, List
 import numpy as np
 import matplotlib.pyplot as plt
 import networkx as nx
 import vizdoom
+from collections import namedtuple
+from omni_drive import OmniDrive
+from player_movement import PlayerMovement, Feedback
 from DOOM import DOOM
 
 
 class Trainer:
-    def __init__(self, cspace_path=None, omni_drive=None):
+    def __init__(self, cspace_path: str = None, omni_drive: OmniDrive = None):
         self.cspace: nx.Graph = None if cspace_path is None else nx.read_gpickle(cspace_path)
         self.omni_drive = omni_drive
 
@@ -57,7 +62,7 @@ class Trainer:
         node_poz = np.stack(node_poz, axis=-1)
         self.cspace = nx.Graph(node_poz=node_poz)  # all info stored in coordinate space graph
 
-        grid_ids = [self._closest_grid_node(p) for pi, p in enumerate(poz)]
+        grid_ids = [self.closest_grid_node(p) for pi, p in enumerate(poz)]
         edges = list(set((grid_ids[pi], grid_ids[pi + 1]) for pi in range(poz.shape[0] - 1)
                          if grid_ids[pi] != grid_ids[pi + 1]))
         nodes = [(cxi, cyi) for cxi, cyi in np.ndindex(node_poz.shape[:2])]
@@ -67,11 +72,11 @@ class Trainer:
 
         # test path planning and draw coordinate space
         start_pos, end_pos = poz[0], poz[len(poz) // 2]
-        path = self._plan_path(start_pos, end_pos)
+        path = self.plan_path(start_pos, end_pos)
 
         nx.draw(self.cspace, pos=node_poz, node_size=50, node_color='grey')
         nx.draw(self.cspace, nodelist=path, pos=node_poz, node_size=60, node_color='red')
-        nx.draw(self.cspace, nodelist=[self._closest_grid_node(start_pos), self._closest_grid_node(end_pos)],
+        nx.draw(self.cspace, nodelist=[self.closest_grid_node(start_pos), self.closest_grid_node(end_pos)],
                 pos=node_poz, node_size=70, node_color='black')
         plt.title('Coordinate space')
         plt.show()
@@ -110,36 +115,66 @@ class Trainer:
 
         doom.close()
 
-    def _closest_grid_node(self, pos: np.ndarray):
-        dist = np.linalg.norm(self.cspace.graph['node_poz'] - pos, axis=-1)
-        return np.unravel_index(np.argmin(dist), self.cspace.graph['node_poz'].shape[:2])
+    def closest_grid_node(self, pos: Union[tuple, np.ndarray], node_subset=None):
+
+        # closest node in a subgraph
+        if node_subset:
+            nodes_w_poz = nx.get_node_attributes(self.cspace.subgraph(node_subset), 'pos')
+            node_ids = list(nodes_w_poz.keys())
+            node_poz = np.stack(nodes_w_poz.values())
+            dist = np.linalg.norm(node_poz - np.asarray(pos), axis=-1)
+            return node_ids[np.argmin(dist)]
+
+        # sped up version when looking for closest node on whole graph
+        else:
+            dist = np.linalg.norm(self.cspace.graph['node_poz'] - np.asarray(pos), axis=-1)
+            return np.unravel_index(np.argmin(dist), self.cspace.graph['node_poz'].shape[:2])
 
     @staticmethod
-    def _path_plan_dist_heuristic(a, b):
+    def _2d_euclidean_dist(a, b):
         x1, y1 = a
         x2, y2 = b
         return ((x1 - x2) ** 2 + (y1 - y2) ** 2) ** 0.5
 
-    def _plan_path(self, start_pos, end_pos):
-        start_node = self._closest_grid_node(start_pos)
-        end_node = self._closest_grid_node(end_pos)
-        return nx.astar_path(self.cspace, start_node, end_node, heuristic=ArenaTrainer._path_plan_dist_heuristic)
+    def plan_path(self, start_pos, end_pos):
+        start_node = self.closest_grid_node(start_pos)
+        end_node = self.closest_grid_node(end_pos)
+        return nx.astar_path(self.cspace, start_node, end_node, heuristic=ArenaTrainer._2d_euclidean_dist)
 
 
 class ArenaTrainer(Trainer):
-    def __init__(self, cspace_path=None, omni_drive=None, reward_freq=50,
-                 kill_r=1., in_sight_r=.1, approach_r=.1, in_sight_dist=200, too_close_dist=50):
+
+    # TRAIN_STATES = ['away', 'close', 'in-sight']  # , 'shot'
+
+    def __init__(self, cspace_path=None, omni_drive=None, lever=None, player_mov=None, reward_freq=50,
+                 kill_r=1., in_sight_r=.1, approach_r=.1, close_dist=200, too_close_dist=50, in_sight_deg=8,
+                 enforce_after_no_action=None, enforce_after_no_reward=None):
         super().__init__(cspace_path, omni_drive)
+        self.lever = lever
+        self.player_mov = player_mov
+
+        # reward vars
         self.reward_freq = reward_freq
         self.kill_r = kill_r
         self.in_sight_r = in_sight_r
         self.approach_r = approach_r
-        self.in_sight_dist = in_sight_dist
+        self.close_dist = close_dist
         self.too_close_dist = too_close_dist
+        self.in_sight_deg = in_sight_deg
 
         self.kill_count = 0
         self.closest_to_monster = np.inf
         self.best_angle = False
+        self.last_movement_t = time.time()
+        self.last_pos = (0, 0)
+        self.last_reward_t = time.time()
+        self.enforcing_from = 'aimless'  # don't enforce anything by default
+
+        # enforcing vars
+        self.train_state_i = 0  # away
+        self.enforce_after_no_action = enforce_after_no_action  # in s; enforcing move after this many seconds of no mov
+        self.enforce_after_no_reward = enforce_after_no_reward  # in s; same but after lack of reward
+        self.enforce_fun = None
 
     def _monster_reset(self, new_kill_count):
         self.kill_count = new_kill_count
@@ -172,15 +207,15 @@ class ArenaTrainer(Trainer):
         return ArenaTrainer._angle_between_vectors3(player, monster, sight)
 
     def give_reward(self, step_i, state):
+        r = 0.
 
         # check if monster killed
         if state.kill_count > self.kill_count:
             self._monster_reset(state.kill_count)
-            return self.kill_r
+            r = self.kill_r
 
         # check if monster got approached or turned towards
-        r = 0.
-        if state.monsters_present >= 1 and step_i % self.reward_freq == 0:
+        elif state.monsters_present > 0 and step_i % self.reward_freq == 0:
 
             # reward approach
             monster_dist = ArenaTrainer._monster_dist(state)
@@ -191,7 +226,7 @@ class ArenaTrainer(Trainer):
                 r += self.approach_r if monster_dist > self.too_close_dist else 0  # reward only up to a distance
 
             # reward turn towards monster - got in sight when close enough
-            if monster_dist < self.in_sight_dist:
+            if monster_dist < self.close_dist:
                 monster_angle = ArenaTrainer._monster_sight_angle(state)
                 if monster_angle < self.best_angle:
                     self.best_angle = monster_angle
@@ -203,10 +238,92 @@ class ArenaTrainer(Trainer):
             print('monster:', state.monster_pos_x, state.monster_pos_y)
             print('distance:', self._monster_dist(state))
 
+        self.last_reward_t = time.time() if r > 0 else self.last_reward_t
         return r  # returns reward in [0, 1]
 
-    def enforce_action(self, step_i, state):
-        pass  # TODO
+    def _get_train_state(self, state):
+        train_state = 'aimless'
+        if state.monsters_present > 0:
+            train_state = 'away'
+            if ArenaTrainer._monster_dist(state) < self.close_dist:
+                train_state = 'close'
+                if ArenaTrainer._monster_sight_angle(state) < self.in_sight_deg:
+                    train_state = 'in-sight'
+        return train_state
+
+    def _get_exec_path_fun(self, start_state, path) -> Callable[[Any], Any]:
+        # if not rolling: find closest grid point on path, roll ball to the next point
+        def _fun(state):
+            if self.omni_drive.mounted and not self.omni_drive.rolling:
+                closest_on_path = self.closest_grid_node((state.position_x, state.position_y), path)
+                closest_on_path_i = path.index(closest_on_path)
+
+                # at the end of path, just move to monster
+                if closest_on_path_i == len(path) - 1:
+                    fb = Feedback(self.player_mov, setpoint=np.array([state.monster_pos_x, state.monster_pos_y,
+                                                                      state.angle]))  # keep current angle for now
+                # on path
+                else:
+                    goal = self.cspace.nodes[path[closest_on_path_i + 1]]['pos']
+                    fb = Feedback(self.player_mov, setpoint=np.concatenate([goal, [state.angle]]))
+
+                self.omni_drive.roll(fb, eps=self.too_close_dist / 2)
+
+        return _fun
+
+    def _get_exec_turn_fun(self, start_state) -> Callable[[Any], Any]:
+        def _fun(state):
+            if self.omni_drive.mounted and not self.omni_drive.rolling:
+                fb = Feedback(self.player_mov, rel_setpoint=np.array([0, 0, self._monster_sight_angle(state)]))  # TODO maybe the negative of the sight angle, or should it be in rad?
+                self.omni_drive.roll(fb, eps=self.in_sight_deg / 2)
+
+        return _fun
+
+    def _get_exec_kill(self, start_state) -> Callable[[Any], Any]:
+        def _fun(state):
+            self.lever.pull()  # TODO depends on lever interface
+        return _fun
+
+    def enforce_action(self, step_i, state):  # TODO !!! test
+        pos = (state.position_x, state.position_y)
+        self.last_movement_t = time.time() if self.last_pos != pos else self.last_movement_t
+        train_state = self._get_train_state(state)
+
+        # transition to aimless resets enforcement
+        #   typically when the monster is killed, so there's nothing to shoot
+        if train_state == 'aimless':
+            self.enforcing_from = 'aimless'
+            self.enforce_fun = None
+            self.omni_drive.letgo()
+
+        # initialise enforcement: when starting enforcement or switching to a different enforcement state
+        may_start_enforcement = self.enforcing_from == 'aimless' and train_state != 'aimless'
+        new_enforcement_state = self.enforcing_from != 'aimless' and self.enforcing_from != train_state
+        if may_start_enforcement or new_enforcement_state:
+            init_enforce = (self.enforce_after_no_action is not None and
+                            time.time() - self.last_movement_t > self.enforce_after_no_action) or \
+                           (self.enforce_after_no_reward is not None and
+                            time.time() - self.last_reward_t > self.enforce_after_no_reward)
+            init_enforce = init_enforce or new_enforcement_state  # start new enforcing step (without stopping)
+
+            if init_enforce:
+                self.enforcing_from = train_state
+                self.omni_drive.mount()
+
+                if train_state == 'away':
+                    path = self.plan_path((state.position_x, state.position_y),
+                                          (state.monster_pos_x, state.monster_pos_y))
+                    self.enforce_fun = self._get_exec_path_fun(state, path)
+
+                elif train_state == 'close':
+                    self.enforce_fun = self._get_exec_turn_fun(state)
+
+                elif train_state == 'in-sight':
+                    self.enforce_fun = self._get_exec_kill(state)
+
+        # run enforcement function
+        if self.enforcing_from != 'aimless' and self.enforce_fun is not None:
+            self.enforce_fun(state)
 
 
 class DiscoveryTrainer(Trainer):

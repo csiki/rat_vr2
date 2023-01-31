@@ -2,7 +2,8 @@ venv/
 .idea/
 tmp/
 tmp.py
+*.pckl
 __pycache__/
 _vizdoom.ini
 /doom/
-*.pckl
+#!/doom/scenarios/arena_lowered.*

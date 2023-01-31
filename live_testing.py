@@ -108,11 +108,12 @@ if __name__ == '__main__':
         pm = PlayerMovement(smooth_dt=.3)
 
         calibration_path = 'omni_calib.pckl'
-        od = PiOmniDrive(conn, mount_tracking=False, calib_path=calibration_path)  # TODO mount_tracking=True
+        od = PiOmniDrive(conn, auto_mounting=False, calib_path=calibration_path)  # TODO mount_tracking=True or nah
         od.setup()
         assert od.get('motion_per_cm') is not None and od.get('motion_per_rad') is not None
 
-        trainer = ArenaTrainer(cspace_path='arena_lowered.map01.pckl', omni_drive=od)
+        trainer = ArenaTrainer(cspace_path='arena_lowered.map01.pckl', omni_drive=od)  # TODO provide player_movement
+        artificial_train_mov = .5  # 1. means movement is defined by omnidrive roll goal, not the sensed motion
 
         # rew = PiRewardCircuit(conn, 'SERIAL_PORT_ON_PI')  # TODO serial port
         # TODO lever
@@ -147,6 +148,9 @@ if __name__ == '__main__':
 
             phys_mov = od.motion_to_phys(mov)
             action = (phys_mov, 0)  # TODO lever
+            # TODO get current aim from omni drive if any, then mix it up with phys_mov:
+            #   weight the 2 according to artificial_train_mov;
+            #   take the magnitude of phys_mov and translate od.current_drive_v to the same magnitude before weighting
 
             # step
             state, reward, terminated, truncated, info = doom.step(action)

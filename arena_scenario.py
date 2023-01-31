@@ -31,7 +31,7 @@ with ServerSocket(host, port) as conn:
     pm = PlayerMovement(do_calc_acc=True)
 
     calibration_path = 'omni_calib.pckl'
-    od = PiOmniDrive(conn, mount_tracking=False, calib_path=calibration_path)  # TODO mount_tracking=True
+    od = PiOmniDrive(conn, auto_mounting=False, calib_path=calibration_path)  # TODO mount_tracking=True
     od.setup()
     assert od.get('motion_per_cm') is not None and od.get('motion_per_rad') is not None
 
