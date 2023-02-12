@@ -1,3 +1,5 @@
+import time
+
 import serial
 from functools import reduce
 from config import *
@@ -23,6 +25,7 @@ class RewardCircuit:
         self.puff_within_distance = puff_within_distance
 
         self.ser = serial.Serial(serial_port, baudrate=57600, timeout=0.05)
+        time.sleep(4)  # wait until arduino sets up
 
     def send_cmd(self, valve_open_ms=0, pressure_setpoint=None, pump_override_ctrl=0,
                  left_blow_ms=0, right_blow_ms=0, mixer_turns=0):
@@ -36,7 +39,12 @@ class RewardCircuit:
         cmd = f'${cmd}*{hex(xor_sum)[2:].upper()}'
         self.ser.write(str.encode(cmd))
 
+        time.sleep(0.1)  # TODO remove prints, don't read shit, this is way too slow
+
         resp = self.ser.readline().decode()
+        resp = resp[len(cmd):]  # rm beg
+        print('resp:', resp)
+
         resp = resp[resp.index(RewardCircuit.RESP_BEG_STR) + len(RewardCircuit.RESP_BEG_STR):
                     resp.index(RewardCircuit.RESP_END_STR)].replace(' ', '')
         rc_state = [s.split(':') for s in resp.split('|')]
@@ -68,7 +76,7 @@ class RewardCircuit:
     def stop(self):
         cmd = 'STOP,,,,,'
         xor_sum = reduce(lambda a, b: a ^ b, map(ord, cmd), 0)
-        cmd = f'${cmd}*{hex(xor_sum)[2:].upper()}'
+        cmd = f'${cmd}*{hex(xor_sum)[2:].upper()}'  # $STOP,,,,,*34
         self.ser.write(str.encode(cmd))
 
     def cleanup(self):

@@ -109,6 +109,7 @@ class PiOverSocket:
 
 
 class PiMotionSensor(MotionSensor, PiOverSocket):  # first base needs to be the wrapped device class
+
     def __init__(self, _conn_sock: socket.socket, *args, **kwargs):
         PiOverSocket.__init__(self, _conn_sock, self.__class__.__base__)  # init wrapper
         # no need to init the wrapped class, the instantiated object here only serves as a wrapper to member functions

@@ -35,8 +35,11 @@ from pi_wrapper import PiSmoothMotion, PiMotionSensor, PiOverSocket, PiCallback,
 
 def main():
 
+    # TODO argparse
     # remote pc/server address
-    server_host, server_port = sys.argv[1], int(sys.argv[2]) if len(sys.argv) > 2 else 4444
+    server_host = sys.argv[1]
+    server_port = int(sys.argv[2]) if len(sys.argv) > 2 else 4444
+    do_restart = bool(sys.argv[3]) if len(sys.argv) > 3 else False
 
     # devices  # TODO add lever, reward, trainer
     device_clss = [MotionSensor, MotionSensors, SmoothMotion, OmniDrive, LinActuator, PlayerMovement, Feedback, RewardCircuit]
@@ -44,6 +47,7 @@ def main():
     device_objs = [dict() for _ in device_clss]  # host id  -> device obj for each class
 
     device_callback_functions: Dict[int, pi_wrapper.PiCallback] = {}  # host id -> device (wrapped) callback function
+    print(f'Listening on {server_host}:{server_port}')
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -128,6 +132,8 @@ def main():
             except Exception as e:
                 print('Exception during cleanup:', e)
 
+    return do_restart
+
 
 if __name__ == '__main__':
-    main()
+    while main(): pass

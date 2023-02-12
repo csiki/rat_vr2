@@ -51,16 +51,16 @@ void setup() {
     pinMode(motor3pin5, OUTPUT);
     pinMode(motor3pin6, OUTPUT);
 
-    for (int i = 10; i > 0; i--) {
-        Serial.print(i);
-        Serial.print(' ');
-        delay(500);
-    }
+//    for (int i = 10; i > 0; i--) {
+//        Serial.print(i);
+//        Serial.print(' ');
+//        delay(500);
+//    }
 
-    Serial.println();
-    // SafeString::setOutput(Serial); //uncomment this to enable error msgs
-    Serial.println("Data format: $DOOM,[Valve Open Millisec(int)],[Pressure SetPoint(float)],[Pump Override Control Millisec(int)],[Left Blow Millisec(int)],[Right Blow Millisec(int)],[Stepper Turns(int)]*CheckSum8Xor");
-    Serial.println(" e.g.: $DOOM,5000,94.4,5000,2500,3500,3*2C");
+//    Serial.println();
+//    // SafeString::setOutput(Serial); //uncomment this to enable error msgs
+//    Serial.println("Data format: $DOOM,[Valve Open Millisec(int)],[Pressure SetPoint(float)],[Pump Override Control Millisec(int)],[Left Blow Millisec(int)],[Right Blow Millisec(int)],[Stepper Turns(int)]*CheckSum8Xor");
+//    Serial.println(" e.g.: $DOOM,5000,94.4,5000,2500,3500,3*2C");
 
     bufferedOut.connect(Serial);  // connect bufferedOut to Serial
     sfReader.connect(bufferedOut);
@@ -137,7 +137,7 @@ bool parseDOOM(SafeString &msg) {
     if (sfField == "$STOP") {  // stop everything
         valveinterval = pressureSP = pumpORinterval = blowlinterval = blowrinterval = turns = 0;
         pumpORflag = false;
-        return false;
+        return true;
     } else if (sfField != "$DOOM") {  // first field should be $DOOM else called with wrong msg
         return false;
     }
@@ -232,7 +232,7 @@ void processUserInput() {
             Serial.print("bad checksum : ");
             Serial.println(sfReader);
         } else {                                  // check sum OK so select msgs to process
-            if (sfReader.startsWith("$DOOM,")) {  // this is the one we want
+            if (sfReader.startsWith("$DOOM,") || sfReader.startsWith("$STOP,")) {  // this is the one we want
                 if (parseDOOM(sfReader)) {
                     feedValve();
                     pumpOverride();

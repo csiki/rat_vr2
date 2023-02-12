@@ -34,6 +34,7 @@ class DOOM(gym.Env):
         'shot_r': -10,
         'dmg_taken_r': -1,  # / hp
         'max_player_speed': 500,  # cm/s; rat max is 500
+        'fov': 90,
     }
 
     # variable naming: https://github.com/mwydmuch/ViZDoom/issues/210
@@ -89,8 +90,9 @@ class DOOM(gym.Env):
 
         self.game.set_mode(self.cfg['mode'])
 
-        buttons = set(self.cfg['buttons'])
+        buttons = self.cfg['buttons']
         if self.cfg['mode'] == Mode.SPECTATOR:  # add btns for keyboard input to work
+            buttons = set(buttons)  # order is not relevant anymore, keyboard bindings are handled by the lib
             buttons.update([Button.MOVE_FORWARD, Button.MOVE_BACKWARD, Button.MOVE_RIGHT, Button.MOVE_LEFT,
                             Button.TURN_LEFT, Button.TURN_RIGHT, Button.STRAFE])
 
@@ -114,10 +116,10 @@ class DOOM(gym.Env):
         if self.cfg['automap']:
             self.game.send_game_command('am_showmonsters true')
             self.game.send_game_command('am_colorset 2')
+        self._after_game_init()
 
         # extra command settings
         self.game.send_game_command('sv_cheats 1')
-        # self.game.send_game_command('fov 120')  # has to be called below for some reason
 
         # movement: https://www.reddit.com/r/Doom/comments/4nt3fo/i_got_bored_and_did_some_math_on_the_original/
         #   8 map units = 1 foot ~= 30 cm
@@ -126,7 +128,7 @@ class DOOM(gym.Env):
         # TODO use vizdoom.sec_to_doom_tics() and doom_tics_to_sec()
         self.tic_per_sec = 35.
         self.map_unit_per_cm = 8. / 30.48
-        self.map_degree_per_rad = 50 / np.pi  # TODO possibly need to implement in-game calibration too
+        self.map_degree_per_rad = 33 / np.pi  # TODO possibly need to implement in-game calibration too
         move_speed_rng = self.cfg['max_player_speed'] #/ self.tic_per_sec * self.map_unit_per_cm  # map_unit / tic
         move_turn_rng = (-0.5, 0.5)  # game degree in [0, 1]
         move_space = gym.spaces.Box(low=np.array([-move_speed_rng, -move_speed_rng, move_turn_rng[0]]),
@@ -137,6 +139,12 @@ class DOOM(gym.Env):
 
         self.step_i = None
         self.start_ammo = None
+
+    def _after_game_init(self):
+        self.game.advance_action(self.cfg['skiprate'])  # run it for 1 iter
+        # self.game.make_action([0, 0, 0, 0], self.cfg['skiprate'])
+        self.game.send_game_command(f'fov {self.cfg["fov"]}')
+        # self.game.send_game_command('vid_setmode 3440 1440')
 
     def _get_state(self):
         state = self.game.get_state()
@@ -173,21 +181,23 @@ class DOOM(gym.Env):
 
         # get state
         state, game_over = self._get_state()
+        finished = self.game.is_episode_finished() or state is None
 
+        # perform computations on state
         b_angle = 0
         b_distance = np.inf  # by default, infinite distance from walls
-        if state.wall_bump_angle != -1:
-            p_angle = state.angle
-            w_angle = state.wall_bump_angle
-            b_angle = (p_angle - w_angle) % 360  # bump angle, front is 0, increasing clockwise
-            b_angle = -(360 - b_angle) if b_angle > 180 else b_angle  # [0,360] -> [-180,+180]
-            b_distance = 0.  # only detecting bumps for now, air puffs are either on when hitting a wall or just off
+        if not finished:  # skip if game exited in the meantime
+            if state.wall_bump_angle != -1:
+                p_angle = state.angle
+                w_angle = state.wall_bump_angle
+                b_angle = (p_angle - w_angle) % 360  # bump angle, front is 0, increasing clockwise
+                b_angle = -(360 - b_angle) if b_angle > 180 else b_angle  # [0,360] -> [-180,+180]
+                b_distance = 0.  # only detecting bumps for now, air puffs are either on when hitting a wall or just off
 
         step_over = time.time()
 
         # TODO should save the state of the acs script: have inverse gitignore in doom/scenarios, or just in the root
 
-        finished = self.game.is_episode_finished()
         return state, reward, state.dead, game_over or finished and not state.dead, \
                {'i': self.step_i, 'step_t': (step_over - step_start) * 1000,
                 'bump_angle': b_angle, 'bump_distance': b_distance, 'action': action}
@@ -198,11 +208,7 @@ class DOOM(gym.Env):
     def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[ObsType, dict]:
         # launch new episode
         self.game.new_episode()
-
-        # send commands after episodes launches
-        self.game.make_action([0, 0, 0, 0], self.cfg['skiprate'])
-        self.game.send_game_command('fov 120')
-        self.game.send_game_command('vid_setmode 3440 1440')
+        self._after_game_init()
 
         state = self._get_state()
         return state, {'i': self.step_i}  # initial state
