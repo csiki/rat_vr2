@@ -87,7 +87,7 @@ void parseFeedValve(SafeString &dataField) {
     if (!dataField.toInt(msec)) {
         return;  // invalid
     }
-    valveinterval += msec;  // TODO changed to +=, TEST IF WORKS
+    valveinterval = msec;  // TODO changed to +=, TEST IF WORKS
 }
 void parseFeedPressure(SafeString &dataField) {
     float msec = 0;
@@ -101,7 +101,7 @@ void parseFeedPump(SafeString &dataField) {
     if (!dataField.toInt(msec)) {
         return;  // invalid
     }
-    pumpORinterval += msec;
+    pumpORinterval = msec;
     pumpORflag = true;
 }
 void parseBlowLeft(SafeString &dataField) {
@@ -109,21 +109,21 @@ void parseBlowLeft(SafeString &dataField) {
     if (!dataField.toInt(msec)) {
         return;  // invalid
     }
-    blowlinterval += msec;
+    blowlinterval = msec;
 }
 void parseBlowRight(SafeString &dataField) {
     int msec = 0;
     if (!dataField.toInt(msec)) {
         return;  // invalid
     }
-    blowrinterval += msec;
+    blowrinterval = msec;
 }
 void parseMixerTurns(SafeString &dataField) {
     int msec = 0;
     if (!dataField.toInt(msec)) {
         return;  // invalid
     }
-    turns += msec;
+    turns = msec;
 }
 
 // just leaves existing values unchanged if new ones are not valid
@@ -179,7 +179,7 @@ void printResponse() {
 
 void feedValve(){
     pMillisValve = currentMillis;
-    digitalWrite(valvePin, HIGH);
+    digitalWrite(valvePin, LOW);  // was high
 }
 void pumpOverride(){
     pMillispumpOR = currentMillis;
@@ -202,7 +202,7 @@ void mixerControl(){
 
 void timerHandler(){
     if (currentMillis - pMillisValve >= valveinterval) {
-        digitalWrite(valvePin, LOW);
+        digitalWrite(valvePin, HIGH);  // was low
     }
     if (pumpORflag && (currentMillis - pMillispumpOR) >= pumpORinterval) {
         digitalWrite(motor1pin1, LOW);

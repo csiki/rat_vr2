@@ -337,6 +337,24 @@ class DiscoveryTrainer(Trainer):
         pass  # TODO
 
 
+class ManualTrainer(Trainer):
+    def __init__(self, omni_drive: OmniDrive, move_r_per_sec: float, kill_r: float):
+        super().__init__(cspace_path=None, omni_drive=omni_drive)
+        # TODO use self.game.set_mode() to set it to vizdoom.Mode.SPECTATOR when rat is under control
+        #   every enforce_action() call check keyboard key presses, and if pressed space it changes to control mode
+        #   when enforcing movement and kill, give immediate reward according to move_reward_per_sec and kill_reward
+        #   check when kill was done and give the reward as given
+        #   have keys to increase/decrease speed
+        # TODO press space again to let the rat control
+
+    def give_reward(self, step_i, state):
+        pass  # TODO
+
+    def enforce_action(self, step_i, state):
+        pass  # TODO
+
+
+
 if __name__ == '__main__':
     trainer = ArenaTrainer(cspace_path='arena_lowered.map01.pckl')
     # grid_size = 30
