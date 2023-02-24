@@ -1,14 +1,17 @@
 import time
 
 from typing import Callable, Any, Union, Tuple, List
+
+import keyboard
 import numpy as np
 import matplotlib.pyplot as plt
 import networkx as nx
 import vizdoom
 from collections import namedtuple
-from omni_drive import OmniDrive
+from omni_drive import OmniDrive, local_man_drive
 from player_movement import PlayerMovement, Feedback
 from DOOM import DOOM
+from lever import Lever
 
 
 class Trainer:
@@ -338,21 +341,69 @@ class DiscoveryTrainer(Trainer):
 
 
 class ManualTrainer(Trainer):
-    def __init__(self, omni_drive: OmniDrive, move_r_per_sec: float, kill_r: float):
+
+    KILL_HAPPENS_WITHIN = 3  # sec after lever pull
+
+    def __init__(self, game: DOOM, omni_drive: OmniDrive, lever: Lever, move_r_per_sec: float, kill_r: float,
+                 r_in_every: float, min_r_given: float = 10., omni_speed=.7):
         super().__init__(cspace_path=None, omni_drive=omni_drive)
-        # TODO use self.game.set_mode() to set it to vizdoom.Mode.SPECTATOR when rat is under control
+        self.game = game
+        self.omni_drive = omni_drive
+        self.lever = lever
+        self.move_r_per_sec = move_r_per_sec
+        self.kill_r = kill_r
+        self.r_in_every = r_in_every  # sec
+        self.min_r_given = min_r_given
+
+        self.man_drive = None
+        self.enforce_called = False
+        self.current_drive = np.zeros(OmniDrive.AXES)
+        self.lever_pulled_at = time.time() - 2 * ManualTrainer.KILL_HAPPENS_WITHIN
+        self.last_move_rewarded = time.time()
+        self.move_r = 0.
+        self.kill_count = 0
+
+        # use self.game.set_mode() to set it to vizdoom.Mode.SPECTATOR when rat is under control
         #   every enforce_action() call check keyboard key presses, and if pressed space it changes to control mode
         #   when enforcing movement and kill, give immediate reward according to move_reward_per_sec and kill_reward
         #   check when kill was done and give the reward as given
         #   have keys to increase/decrease speed
-        # TODO press space again to let the rat control
+
+    def _setup_man_drive(self):
+        self.man_drive = local_man_drive(self.omni_drive)  # omni_drive should be a PiOmniDrive
 
     def give_reward(self, step_i, state):
-        pass  # TODO
+        r = 0.
+        if np.any(self.current_drive != 0):
+            self.move_r += np.linalg.norm(self.current_drive) * self.move_r_per_sec
+
+        if self.move_r > self.min_r_given and time.time() - self.last_move_rewarded > self.r_in_every:
+            r += self.move_r * self.r_in_every
+            self.move_r = 0
+            self.last_move_rewarded = time.time()
+
+        if state.kill_count > self.kill_count and \
+                time.time() - self.lever_pulled_at < ManualTrainer.KILL_HAPPENS_WITHIN:
+            self.lever_pulled_at = time.time() - 2 * ManualTrainer.KILL_HAPPENS_WITHIN
+            r += self.kill_r
+
+        return r
 
     def enforce_action(self, step_i, state):
-        pass  # TODO
+        if not self.enforce_called:  # first call
+            self._setup_man_drive()
+            self.enforce_called = True
 
+        self.current_drive, mount_state = self.man_drive()
+
+        if mount_state == 'mounted':
+            self.game.game.set_mode(vizdoom.Mode.SPECTATOR)
+        elif mount_state == 'letgo':
+            self.game.game.set_mode(vizdoom.Mode.PLAYER)
+
+        if keyboard.is_pressed(Lever.KEY_SHOOT):
+            self.lever.pull()
+            self.lever_pulled_at = time.time()
 
 
 if __name__ == '__main__':

@@ -6,6 +6,7 @@ scipy
 sklearn
 torch
 simple-pid
+keyboard
 sshkeyboard
 gym
 vizdoom

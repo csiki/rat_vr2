@@ -4,6 +4,7 @@ import signal
 import sched
 import pickle
 from importlib.util import find_spec
+from pprint import pprint
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,6 +12,7 @@ from scipy.optimize import curve_fit
 from typing import Callable, Any, Union, Tuple, List
 import simple_pid
 import sshkeyboard
+import keyboard
 
 if find_spec('RPi'):
     import RPi.GPIO as GPIO
@@ -30,6 +32,10 @@ class OmniDrive:
     ROLLER1_PINS = {'right': 5, 'left': 6, 'pwm': 13}
     ROLLER2_PINS = {'right': 25, 'left': 26, 'pwm': 12}
     ROLLER_PINS = [ROLLER0_PINS, ROLLER1_PINS, ROLLER2_PINS]
+
+    KEYBOARD_MAPPING = {'up': 'forward', 'down': 'backward', 'right': 'right_turn', 'left': 'left_turn',
+                        'w': 'forward', 's': 'backward', 'd': 'right_strafe', 'a': 'left_strafe',
+                        'k': 'left_turn', 'l': 'right_turn'}
 
     # TODO integrate manual mode into OmniDrive, so it can be activated, so user can test it in game, with keymapping ?
 
@@ -111,9 +117,13 @@ class OmniDrive:
             self.drive_2_game_vel = calib['drive_2_game_vel']
             self.drive_2_game_acc = calib['drive_2_game_acc']
 
+        self.got_set_up = False
         GPIO.setmode(GPIO.BCM)
 
-    def setup(self):
+    def setup(self):  # call before using OmniDrive
+        if self.got_set_up:
+            print('OmniDrive already got set up, running .setup again..', file=sys.stderr)
+
         self.pwms = []
 
         for pins in self.roller_pins:
@@ -132,6 +142,10 @@ class OmniDrive:
             self.mount(blocking=True)  # make sure the structure won't be raised out-of-bounds
             self.letgo(blocking=True)
         self.mounted = False
+
+        self.got_set_up = True
+
+        return self
 
     def save(self, calib_path):  # TODO use get and setattr; this is ugly
         calib = {'noise_floors': self.noise_floors, 'pwm_to_motion_p': self.pwm_to_motion_p,
@@ -171,7 +185,8 @@ class OmniDrive:
     def calc_wheel_v(self, drive_v, ret_wheel_v=False):
         highest_abs_v = np.abs(drive_v).max()
         if highest_abs_v > 1.:
-            print(f'Highest absolute velocity cannot be over 1.0: {highest_abs_v}!', file=sys.stderr)
+            print(f'Velocity values should be in the range [-1,1]: {highest_abs_v}!', file=sys.stderr)
+            drive_v /= highest_abs_v
 
         # flip forward-backward
         drive_v = np.array(drive_v)  # cpy first
@@ -673,16 +688,9 @@ class OmniDrive:
         # TODO implement actual incremental calibration as described above
 
 
-def calibrate(calibration_path, **calib_kwargs):  # TODO argparsed input from main
-    omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4)
+def calibrate(omni_drive, calibration_path, **calib_kwargs):
     omni_drive.setup()
     omni_drive.mount()
-
-    def exit_code(*args):
-        omni_drive.cleanup()
-        exit(0)
-
-    signal.signal(signal.SIGINT, exit_code)
 
     # calibrate
     print('Calibrate transfer function..')
@@ -747,42 +755,21 @@ def wheel_tests(omni_drive: OmniDrive):
     time.sleep(2)
 
 
-def onmni_test(calibratopn_path=None):
-
-    omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4, calib_path=calibratopn_path)
-    omni_drive.setup()
-
-    def exit_code(*args):
-        omni_drive.cleanup()
-        exit(0)
-
-    signal.signal(signal.SIGINT, exit_code)
-
-    # tests
+def onmni_test(omni_drive):
     wheel_tests(omni_drive)
+    # TODO ...
     omni_drive.cleanup()
 
 
-def man_drive(speed, calibration_path, check_motion=False):
-
-    omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4, calib_path=calibration_path)
-    omni_drive.setup()
+def ssh_man_drive(omni_drive, speed, check_motion=False):
 
     if check_motion:
         flo1 = MotionSensor(**FRONT_MOTION_PARAMS)
         flo2 = MotionSensor(**SIDE_MOTION_PARAMS)
         flo = MotionSensors(flo1, flo2)
 
-    def exit_code(*args):
-        omni_drive.cleanup()
-        exit(0)
-
-    signal.signal(signal.SIGINT, exit_code)
-
     class _man_drive_key_listener:
-        key_mapping = {'up': 'forward', 'down': 'backward', 'right': 'right_strafe', 'left': 'left_strafe',
-                       'w': 'forward', 's': 'backward', 'd': 'right_strafe', 'a': 'left_strafe',
-                       'k': 'left_turn', 'l': 'right_turn'}
+        key_mapping = OmniDrive.KEYBOARD_MAPPING
 
         def _press(self, key):
             if key in self.key_mapping:
@@ -821,6 +808,59 @@ def man_drive(speed, calibration_path, check_motion=False):
     omni_drive.cleanup()
 
 
+def local_man_drive(omni_drive: OmniDrive, init_speed=.7):  # TODO test !!!
+    key_mapping = OmniDrive.KEYBOARD_MAPPING
+
+    print('drive keymapping:', flush=True)
+    pprint(key_mapping)
+    print('to increase/decrease speed press the 1 and 2 number keys')
+    print('press space to mount/unmount omni drive')
+
+    class _socket_drive():
+        def __init__(self, omni_drive: OmniDrive, speed: float):
+            self.omni_drive = omni_drive
+            self.speed = speed
+            self.prev_dir = np.zeros(OmniDrive.AXES)
+
+        def __call__(self):  # call in a loop
+            current_dir = np.zeros(OmniDrive.AXES)
+            mount_state = 'stay'
+
+            # compute direction
+            for key, direction in key_mapping.items():
+                if keyboard.is_pressed(key):
+                    current_dir += self.omni_drive.simple_dirs_v[direction]
+
+            # set volume
+            if keyboard.is_pressed('1'):
+                self.speed -= .1
+            elif keyboard.is_pressed('2'):
+                self.speed += .1
+
+            # (un)mount
+            if keyboard.is_pressed('space'):
+                if self.omni_drive.mounted:
+                    self.omni_drive.letgo()
+                    mount_state = 'letgo'
+                else:  # was not mounted
+                    self.omni_drive.mount()
+                    mount_state = 'mounted'
+
+            current_dir /= np.abs(current_dir).max()  # normalize to [-1, 1]
+
+            if np.any(current_dir != self.prev_dir):
+                self.prev_dir = current_dir
+                if current_dir.sum() == 0:
+                    self.omni_drive.stop()
+                else:  #
+                    wheel_dir, wheel_dc = self.omni_drive.calc_wheel_v(current_dir * self.speed)
+                    self.omni_drive.drive(wheel_dir, wheel_dc)
+
+            return current_dir, mount_state
+
+    return _socket_drive(omni_drive, init_speed)
+
+
 def main():
     # man args: speed calibration_path
     # calibrate args: calibration_path cm_per_game_dist_unit  # TODO argparse
@@ -828,18 +868,43 @@ def main():
     function = sys.argv[1]  # must be 'man', 'calibrate' or 'test'
     assert function in ['man', 'calib', 'test']
 
-    if function == 'man':
+    def get_exit_code(omni_drive: OmniDrive):
+        def _exit():
+            omni_drive.cleanup()
+            exit(0)
+        return _exit
+
+    if function.startswith('man'):
         speed = float(sys.argv[2]) if len(sys.argv) > 2 else .7
         calibration_path = sys.argv[3] if len(sys.argv) > 3 else None
-        man_drive(speed, calibration_path)  # TODO add calibration file path (optional)
+        omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4, calib_path=calibration_path).setup()
+        signal.signal(signal.SIGINT, get_exit_code(omni_drive))
+
+        if function == 'man':
+            ssh_man_drive(omni_drive, speed)
+        elif function == 'man2':
+            drive = local_man_drive(omni_drive, speed)  # TODO test
+            while True:
+                drive()
+
     elif function == 'calib':
         calibration_path = sys.argv[2]  # omni_calib.pckl
         cm_per_game_dist_unit = float(sys.argv[3])  # 3.81 for DOOM
-        calibrate(calibration_path, cm_per_game_dist_unit=cm_per_game_dist_unit)
+        omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4).setup()
+        signal.signal(signal.SIGINT, get_exit_code(omni_drive))
+
+        calibrate(omni_drive, calibration_path, cm_per_game_dist_unit=cm_per_game_dist_unit)
+
     elif function == 'test':
         calibration_path = sys.argv[2] if len(sys.argv) > 2 else None
-        onmni_test(calibration_path)
+        omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4, calib_path=calibration_path).setup()
+        signal.signal(signal.SIGINT, get_exit_code(omni_drive))
+
+        onmni_test(omni_drive)
 
 
 if __name__ == '__main__':
-    main()
+
+
+    exit()
+    main()  # TODO
