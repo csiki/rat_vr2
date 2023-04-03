@@ -129,6 +129,7 @@ def main():
             try:
                 if 'cleanup' in funs:
                     obj.cleanup()
+                    print('cleanup:', obj)
             except Exception as e:
                 print('Exception during cleanup:', e)
 

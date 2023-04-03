@@ -83,4 +83,6 @@ class RewardCircuit:
         self.ser.write(str.encode(cmd))
 
     def cleanup(self):
+        self.stop()
+        time.sleep(0.5)
         self.ser.close()

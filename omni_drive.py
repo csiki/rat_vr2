@@ -145,8 +145,6 @@ class OmniDrive:
 
         self.got_set_up = True
 
-        return self
-
     def save(self, calib_path):  # TODO use get and setattr; this is ugly
         calib = {'noise_floors': self.noise_floors, 'pwm_to_motion_p': self.pwm_to_motion_p,
                  'pid_p': self.pid_p, 'pid_dt': self.pid_dt, 'pid_err_scalers': self.pid_err_scalers,
@@ -877,7 +875,8 @@ def main():
     if function.startswith('man'):
         speed = float(sys.argv[2]) if len(sys.argv) > 2 else .7
         calibration_path = sys.argv[3] if len(sys.argv) > 3 else None
-        omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4, calib_path=calibration_path).setup()
+        omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4, calib_path=calibration_path)
+        omni_drive.setup()
         signal.signal(signal.SIGINT, get_exit_code(omni_drive))
 
         if function == 'man':
@@ -890,21 +889,21 @@ def main():
     elif function == 'calib':
         calibration_path = sys.argv[2]  # omni_calib.pckl
         cm_per_game_dist_unit = float(sys.argv[3])  # 3.81 for DOOM
-        omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4).setup()
+        omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4)
+        omni_drive.setup()
         signal.signal(signal.SIGINT, get_exit_code(omni_drive))
 
         calibrate(omni_drive, calibration_path, cm_per_game_dist_unit=cm_per_game_dist_unit)
 
     elif function == 'test':
         calibration_path = sys.argv[2] if len(sys.argv) > 2 else None
-        omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4, calib_path=calibration_path).setup()
+        omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4, calib_path=calibration_path)
+        omni_drive.setup()
         signal.signal(signal.SIGINT, get_exit_code(omni_drive))
 
         onmni_test(omni_drive)
 
 
 if __name__ == '__main__':
-
-
-    exit()
+    # exit()
     main()  # TODO

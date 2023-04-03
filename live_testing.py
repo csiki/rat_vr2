@@ -131,7 +131,7 @@ if __name__ == '__main__':
         # smooth_flo2 = PiSmoothMotion(conn, flo2, 0.1)
         smooth_flo = PiSmoothMotion(conn, flo, 0.1, 100)
 
-        pm = PlayerMovement(smooth_dt=.3)
+        pm = PlayerMovement(smooth_dt=.1)
 
         calibration_path = 'omni_calib.pckl'
         od = PiOmniDrive(conn, auto_mounting=False, calib_path=calibration_path)  # TODO mount_tracking=True or nah
