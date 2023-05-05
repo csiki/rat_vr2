@@ -9,7 +9,7 @@ class PlayerMovement:  # in-game movement tracking
 
     MIN_HISTORY = 6
     HISTORY_SIZE = 500
-    SMOOTH_DT = -.1  # sec; < 0
+    SMOOTH_DT = .1  # sec; < 0
     AXES = 3
 
     def __init__(self, hist_size: int = HISTORY_SIZE, smooth_dt: float = SMOOTH_DT):
@@ -38,7 +38,7 @@ class PlayerMovement:  # in-game movement tracking
         self.pos = self._reg_pos(pos, tnow)  # in-game position (x, y, angle); angle in rad
 
         # the last elements of velocity and acceleration are partially calculated if not provided
-        #   e.g. for DOOM angle velocity cannot be read from game variables (easy)
+        #   e.g. for DOOM angle velocity cannot be read from game variables (that easy)
         self.vel[:vel.size] = vel  # in-game velocity (x/s, y/s, angle/s)
         self.vel[vel.size:] = self._calc_vel(tnow)[vel.size:] if vel.size < PlayerMovement.AXES else []
         self.acc[:acc.size] = acc  # in-game acceleration (x/s^2, y/s^2, angle/s^2)

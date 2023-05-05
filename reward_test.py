@@ -35,30 +35,30 @@ if __name__ == '__main__':
     with ServerSocket(host, port) as conn:
         reward_circuit = PiRewardCircuit(conn, serial_port)
 
-        reward_circuit.send_cmd(pressure_setpoint=100)
+        reward_circuit.send(pressure_setpoint=100)
 
         # for i in range(50):
         #     print('open')
-        #     reward_circuit.send_cmd(valve_open_ms=2000)#, pressure_setpoint=0)
+        #     reward_circuit.send(valve_open_ms=2000)#, pressure_setpoint=0)
         #     time.sleep(2000 / 1000)
         #     print('close')
-        #     reward_circuit.send_cmd(valve_open_ms=0)#, pressure_setpoint=0)#, pressure_setpoint=0)
+        #     reward_circuit.send(valve_open_ms=0)#, pressure_setpoint=0)#, pressure_setpoint=0)
         #     time.sleep(2000 / 1000)
         #     print(i)
         #
-        reward_circuit.send_cmd(valve_open_ms=3000, left_blow_ms=2000)
+        reward_circuit.send(valve_open_ms=3000, left_blow_ms=2000)
         time.sleep(4)
-        reward_circuit.send_cmd(valve_open_ms=3000, left_blow_ms=2000)
+        reward_circuit.send(valve_open_ms=3000, left_blow_ms=2000)
         time.sleep(4)
-        reward_circuit.send_cmd(valve_open_ms=3000, left_blow_ms=2000)
+        reward_circuit.send(valve_open_ms=3000, left_blow_ms=2000)
         time.sleep(6)
         reward_circuit.stop()
 
-        # reward_circuit.send_cmd(left_blow_ms=10000, right_blow_ms=2000)
+        # reward_circuit.send(left_blow_ms=10000, right_blow_ms=2000)
         # time.sleep(10)
-        reward_circuit.send_cmd(left_blow_ms=8000)
+        reward_circuit.send(left_blow_ms=8000)
         time.sleep(8)
-        reward_circuit.send_cmd(right_blow_ms=8000)
+        reward_circuit.send(right_blow_ms=8000)
         time.sleep(8)
 
         reward_circuit.stop()

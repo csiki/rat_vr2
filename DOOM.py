@@ -22,9 +22,11 @@ class DOOM(gym.Env):
     DEFAULT_CFG = {
         'mode': Mode.PLAYER,
         'res': ScreenResolution.RES_1920X1080,
+        'post_set_res': None,  # in the form 'width height'
         'win_visible': True,
         'fullscreen': True,
         'render_hud': False,
+        'render_msgs': True,
         'automap': False,
         'buttons': [Button.MOVE_FORWARD_BACKWARD_DELTA, Button.MOVE_LEFT_RIGHT_DELTA, Button.TURN_LEFT_RIGHT_DELTA,
                     Button.ATTACK],
@@ -73,6 +75,7 @@ class DOOM(gym.Env):
         self.game.set_screen_resolution(self.cfg['res'])
         self.game.set_screen_format(ScreenFormat.RGB24)
         self.game.set_render_hud(self.cfg['render_hud'])
+        self.game.set_render_messages(self.cfg['render_msgs'])
         # self.game.add_game_args("-width 3440 -height 1440")  # -record recordings
         self.game.add_game_args(f'+fullscreen 1 +viz_nocheat 0 +fullscreen {[0, 1][self.cfg["fullscreen"]]} +freelook 1')
         # self.game.add_game_args('+snd_mididevice -1 +snd_midipatchset /media/viktor/OS/csiki/rats_play_doom/doom/gm.dls')
@@ -142,9 +145,9 @@ class DOOM(gym.Env):
 
     def _after_game_init(self):
         self.game.advance_action(self.cfg['skiprate'])  # run it for 1 iter
-        # self.game.make_action([0, 0, 0, 0], self.cfg['skiprate'])
         self.game.send_game_command(f'fov {self.cfg["fov"]}')
-        # self.game.send_game_command('vid_setmode 3440 1440')
+        if self.cfg['post_set_res'] is not None:
+            self.game.send_game_command(f'vid_setmode {self.cfg["post_set_res"]}')
 
     def _get_state(self):
         state = self.game.get_state()
@@ -199,8 +202,8 @@ class DOOM(gym.Env):
         # TODO should save the state of the acs script: have inverse gitignore in doom/scenarios, or just in the root
 
         return state, reward, state.dead, game_over or finished and not state.dead, \
-               {'i': self.step_i, 'step_t': (step_over - step_start) * 1000,
-                'bump_angle': b_angle, 'bump_distance': b_distance, 'action': action}
+               {'step_i': self.step_i, 'step_t': (step_over - step_start) * 1000,
+                'bump_angle': b_angle, 'bump_dist': b_distance, 'action': action}
 
     def render(self) -> Optional[Union[RenderFrame, List[RenderFrame]]]:
         pass  # happens anyway
@@ -229,7 +232,7 @@ def doom_test():
         a = np.array([0, 0, 0]), 0
         state, reward, terminated, truncated, info = doom.step(a)
 
-        step_i = info['i']
+        step_i = info['step_i']
         step_times.append(info['step_t'])
         game_over = terminated or truncated
 

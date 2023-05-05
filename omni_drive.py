@@ -120,6 +120,15 @@ class OmniDrive:
         self.got_set_up = False
         GPIO.setmode(GPIO.BCM)
 
+    # getters: nice for reaching variables over socket com
+    # (shut up, properties are a hustle, not gonna rename my vars)
+
+    def get_simple_dir_v(self, dir):
+        return self.simple_dirs_v[dir]
+
+    def is_mounted(self):
+        return self.mounted
+
     def setup(self):  # call before using OmniDrive
         if self.got_set_up:
             print('OmniDrive already got set up, running .setup again..', file=sys.stderr)
@@ -183,7 +192,7 @@ class OmniDrive:
     def calc_wheel_v(self, drive_v, ret_wheel_v=False):
         highest_abs_v = np.abs(drive_v).max()
         if highest_abs_v > 1.:
-            print(f'Velocity values should be in the range [-1,1]: {highest_abs_v}!', file=sys.stderr)
+            print(f'Velocity values should be in the range [-1,1]: {drive_v.tolist()}!', file=sys.stderr)
             drive_v /= highest_abs_v
 
         # flip forward-backward
@@ -810,7 +819,7 @@ def local_man_drive(omni_drive: OmniDrive, init_speed=.7):  # TODO test !!!
     key_mapping = OmniDrive.KEYBOARD_MAPPING
 
     print('drive keymapping:', flush=True)
-    pprint(key_mapping)
+    print('\n'.join([f'- {k}: {d}' for k, d in key_mapping.items()]))
     print('to increase/decrease speed press the 1 and 2 number keys')
     print('press space to mount/unmount omni drive')
 
@@ -827,30 +836,31 @@ def local_man_drive(omni_drive: OmniDrive, init_speed=.7):  # TODO test !!!
             # compute direction
             for key, direction in key_mapping.items():
                 if keyboard.is_pressed(key):
-                    current_dir += self.omni_drive.simple_dirs_v[direction]
+                    current_dir += self.omni_drive.get_simple_dir_v(direction)
 
             # set volume
             if keyboard.is_pressed('1'):
-                self.speed -= .1
+                self.speed = max(.1, self.speed - .1)
             elif keyboard.is_pressed('2'):
-                self.speed += .1
+                self.speed += min(1., self.speed + .1)
 
             # (un)mount
             if keyboard.is_pressed('space'):
-                if self.omni_drive.mounted:
+                if self.omni_drive.is_mounted():
                     self.omni_drive.letgo()
                     mount_state = 'letgo'
                 else:  # was not mounted
                     self.omni_drive.mount()
                     mount_state = 'mounted'
 
-            current_dir /= np.abs(current_dir).max()  # normalize to [-1, 1]
+            max_move = np.abs(current_dir).max()
+            current_dir /= max_move if max_move > 0 else 1  # normalize to [-1, 1]
 
             if np.any(current_dir != self.prev_dir):
                 self.prev_dir = current_dir
                 if current_dir.sum() == 0:
                     self.omni_drive.stop()
-                else:  #
+                else:
                     wheel_dir, wheel_dc = self.omni_drive.calc_wheel_v(current_dir * self.speed)
                     self.omni_drive.drive(wheel_dir, wheel_dc)
 

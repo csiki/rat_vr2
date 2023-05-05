@@ -38,7 +38,7 @@ class Trainer:
         while not game_over:  # and not step_i > 3000:
             a = np.array([0, 0, 0]), 0
             state, reward, terminated, truncated, info = doom.step(a)
-            step_i = info['i']
+            step_i = info['step_i']
             no_action = sum(info['action']) == 0
 
             if not no_action:
@@ -103,7 +103,7 @@ class Trainer:
         while not game_over:  # and not step_i > 3000:
             a = np.array([0, 0, 0]), 0
             state, reward, terminated, truncated, info = doom.step(a)
-            step_i = info['i']
+            step_i = info['step_i']
             no_action = sum(info['action']) == 0
 
             if call_reward:
@@ -401,7 +401,7 @@ class ManualTrainer(Trainer):
         elif mount_state == 'letgo':
             self.game.game.set_mode(vizdoom.Mode.PLAYER)
 
-        if keyboard.is_pressed(Lever.KEY_SHOOT):
+        if keyboard.is_pressed(Lever.KEY_SHOOT) and self.lever is not None:
             self.lever.pull()
             self.lever_pulled_at = time.time()
 
