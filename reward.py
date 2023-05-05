@@ -1,3 +1,4 @@
+import sys
 import time
 
 import serial
@@ -46,11 +47,15 @@ class RewardCircuit:
         resp = resp[len(cmd):]  # rm beg
         print('resp:', resp)
 
-        resp = resp[resp.index(RewardCircuit.RESP_BEG_STR) + len(RewardCircuit.RESP_BEG_STR):
-                    resp.index(RewardCircuit.RESP_END_STR)].replace(' ', '')
-        rc_state = [s.split(':') for s in resp.split('|')]
-        rc_state = {name: float(val) for name, val in rc_state}
-        # TODO remove response, or have it as an option; we will probably not need it
+        rc_state = None
+        try:
+            resp = resp[resp.index(RewardCircuit.RESP_BEG_STR) + len(RewardCircuit.RESP_BEG_STR):
+                        resp.index(RewardCircuit.RESP_END_STR)].replace(' ', '')
+            rc_state = [s.split(':') for s in resp.split('|')]
+            rc_state = {name: float(val) for name, val in rc_state}
+            # TODO remove response, or have it as an option; we will probably not need it
+        except ValueError:
+            print('INVALID RESPONSE:', resp, file=sys.stderr)
 
         print('cmd:', cmd)
         print('Reward response:', rc_state)  # TODO

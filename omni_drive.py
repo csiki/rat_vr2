@@ -23,7 +23,7 @@ from actuator import LinActuator
 from motion import MotionSensor, MotionSensors
 from player_movement import PlayerMovement, Feedback
 from config import *
-from shared_resources import *
+from common import *
 
 
 class OmniDrive:

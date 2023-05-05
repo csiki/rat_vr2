@@ -8,7 +8,7 @@ import traceback
 from typing import Callable, Any, Union, Tuple, Dict
 from copy import deepcopy
 
-from shared_resources import *
+from common import *
 from motion import MotionSensor, MotionSensors, SmoothMotion
 from omni_drive import OmniDrive
 from actuator import LinActuator

@@ -19,6 +19,7 @@ from pi_wrapper import PiSmoothMotion, PiMotionSensor, PiMotionSensors, PiOmniDr
 
 # pc/server address
 host, port = '192.168.0.129', 4444  # TODO as cmd argument or feel automatically
+reward_serial_port = '/dev/ttyACM0'
 
 with ServerSocket(host, port) as conn:
 
@@ -28,14 +29,14 @@ with ServerSocket(host, port) as conn:
     flo = PiMotionSensors(conn, flo1, flo2)
     smooth_flo = PiSmoothMotion(conn, flo, 0.05)
 
-    pm = PlayerMovement(do_calc_acc=True)
+    pm = PlayerMovement()
 
     calibration_path = 'omni_calib.pckl'
     od = PiOmniDrive(conn, auto_mounting=False, calib_path=calibration_path)  # TODO mount_tracking=True
     od.setup()
     assert od.get('motion_per_cm') is not None and od.get('motion_per_rad') is not None
 
-    # rew = PiRewardCircuit(conn, 'SERIAL_PORT_ON_PI')  # TODO serial port
+    reward_circuit = PiRewardCircuit(conn, reward_serial_port)
     # TODO lever
 
     # setup game
