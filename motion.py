@@ -43,7 +43,7 @@ class MotionSensor:  # on-ball movement tracking
         if self._has_run_get_rel_motion:
             try:
                 x, y = self.sensor.get_motion(timeout=0.001)
-                self._last_rec = time.time()  # FIXME moved it here; is this fine? still not accurate enough - maybe the limitation of the sensor
+                self._last_rec = time.time()
                 self.rel_x += x
                 self.rel_y += y
                 self.abs_x += x

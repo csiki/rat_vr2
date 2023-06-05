@@ -76,12 +76,12 @@ with ServerSocket(host, port) as conn:
                 vel=np.array([state.velocity_x, state.velocity_y]))
 
         # train
-        # trainer.enforce_action(info['step_i'], state)
-        # reward += trainer.give_reward(info['step_i'], state)
+        trainer.enforce_action(info['step_i'], state)
+        reward += trainer.give_reward(info['step_i'], state)
 
         # dispense rewards
-        puff_cmd = reward_circuit.calc_puff_from_wall_bump(info['bump_angle'], info['bump_dist'], return_as_cmd=True)
-        reward = max(0., reward)  # positive reinforcement
+        puff_cmd = reward_circuit.calc_puff_from_wall_bump(info['bump_angle'], info['bump_dist'], return_cmd=True)
+        reward = max(0., reward)  # positive reinforcement only
         reward_circuit.send(valve_open_ms=reward, **puff_cmd)
 
         # benchmarking
@@ -91,3 +91,5 @@ with ServerSocket(host, port) as conn:
 
         if info['step_i'] % 100 == 0:
             print('avg loop time:', np.mean(loop_ts) * 1000)
+
+    trainer.cleanup()

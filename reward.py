@@ -119,7 +119,7 @@ class RewardCircuit:
         ms = ul * self.valve_ms_per_ul if ul is not None else ms
         self.send(valve_open_ms=ms)
 
-    def calc_puff_from_wall_bump(self, b_angle, b_distance, return_as_cmd=False):
+    def calc_puff_from_wall_bump(self, b_angle, b_distance, return_cmd=False):
         # puff rules: at 0 degree both left and right blows at max=1
         #   from -puff_delta_share_degree to 0, a gradient of blow from right from 0 to 1
         #   from puff_delta_share_degree to 0, a gradient of blow from left from 0 to 1
@@ -133,7 +133,7 @@ class RewardCircuit:
         # linear puff strength from 0 to 1, by puff_within_distance distance to 0
         puff_dist_scaler = max(0, 1 - b_distance / self.puff_within_distance)
 
-        if return_as_cmd:
+        if return_cmd:
             return dict(left_blow_ms=self.puff_base_dur * left_puff * puff_dist_scaler,
                         right_blow_ms=self.puff_base_dur * right_puff * puff_dist_scaler)
         return left_puff * puff_dist_scaler, right_puff * puff_dist_scaler

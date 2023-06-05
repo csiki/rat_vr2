@@ -12,6 +12,7 @@ from omni_drive import OmniDrive, local_man_drive
 from player_movement import PlayerMovement, Feedback
 from DOOM import DOOM
 from lever import Lever
+from threading import Thread
 
 
 class Trainer:
@@ -357,6 +358,9 @@ class ManualTrainer(Trainer):
 
         self.man_drive = None
         self.enforce_called = False
+        self.enforce_thread = None
+        self.keep_enforcing = True
+
         self.current_drive = np.zeros(OmniDrive.AXES)
         self.lever_pulled_at = time.time() - 2 * ManualTrainer.KILL_HAPPENS_WITHIN
         self.last_move_rewarded = time.time()
@@ -389,21 +393,31 @@ class ManualTrainer(Trainer):
 
         return r
 
+    def _enforce_loop(self):
+        while self.keep_enforcing:
+            self.current_drive, mount_state = self.man_drive()
+
+            if mount_state == 'mounted':
+                self.game.game.set_mode(vizdoom.Mode.SPECTATOR)
+            elif mount_state == 'letgo':
+                self.game.game.set_mode(vizdoom.Mode.PLAYER)
+
+            if keyboard.is_pressed(Lever.KEY_SHOOT) and self.lever is not None:
+                self.lever.pull()
+                self.lever_pulled_at = time.time()
+
+            time.sleep(0.001)
+
     def enforce_action(self, step_i, state):
         if not self.enforce_called:  # first call
             self._setup_man_drive()
             self.enforce_called = True
+            self.enforce_thread = Thread(target=self._enforce_loop)
+            self.enforce_thread.start()
 
-        self.current_drive, mount_state = self.man_drive()
-
-        if mount_state == 'mounted':
-            self.game.game.set_mode(vizdoom.Mode.SPECTATOR)
-        elif mount_state == 'letgo':
-            self.game.game.set_mode(vizdoom.Mode.PLAYER)
-
-        if keyboard.is_pressed(Lever.KEY_SHOOT) and self.lever is not None:
-            self.lever.pull()
-            self.lever_pulled_at = time.time()
+    def cleanup(self):
+        self.keep_enforcing = False
+        self.enforce_thread.join()
 
 
 if __name__ == '__main__':
