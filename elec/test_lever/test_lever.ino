@@ -5,14 +5,14 @@ Servo servo;
 int servoPin = 6;
 int servoOffPos = 120;
 int servoOnPos = 180;
-int lastSwitched = 0;
+unsigned long lastSwitched = 0;
 int switchh = servoOffPos;
 
-int rotCLK = A1;
-int rotDT = A2;
-int rotSW = A3;
+int rotCLK = 3;
+int rotDT = A0;
+int rotSW = A1;
 int rotDebounceDelay = 5;
-byte rotPos = 0, rotLastPos = 0, rotLastState;
+int rotPos = 0, rotLastPos = 0, rotLastState;
 
 //int rotCounter = 0;
 //int rotCurrentStateCLK;
@@ -25,10 +25,15 @@ void setup() {
     pinMode(servoPin, OUTPUT);
     servo.attach(servoPin);
     servo.write(servoOffPos);
-
+    
     pinMode(rotDT, INPUT);
     pinMode(rotSW, INPUT_PULLUP);
     pinMode(rotCLK, INPUT_PULLUP);
+
+    digitalWrite(rotCLK, LOW);
+    digitalWrite(rotDT, LOW);
+    digitalWrite(rotSW, LOW);
+    
     attachInterrupt(digitalPinToInterrupt(rotCLK), encoder, CHANGE);
 }
 
@@ -42,7 +47,7 @@ void loop() {
         else
             switchh = servoOffPos;
 
-        servo.write(switchh);
+        //servo.write(switchh);
     }
 
     if(rotPos != rotLastPos)
@@ -54,6 +59,8 @@ void loop() {
     // Check if encoder is pressed
     if(digitalRead(rotSW) == false)
       Serial.println("Pressed!");
+
+    Serial.println(rotPos);
 
 }
 
