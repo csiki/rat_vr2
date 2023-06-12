@@ -2,13 +2,13 @@
 
 
 Servo servo;
-int servoPin = 6;
+int servoPin = A2;
 int servoOffPos = 120;
 int servoOnPos = 180;
 unsigned long lastSwitched = 0;
 int switchh = servoOffPos;
 
-int rotCLK = 3;
+int rotCLK = 6;
 int rotDT = A0;
 int rotSW = A1;
 int rotDebounceDelay = 5;
