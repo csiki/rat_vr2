@@ -4,7 +4,7 @@
 Servo servo;
 int servoPin = A2;
 int servoOffPos = 120;
-int servoOnPos = 180;
+int servoOnPos = 199;
 unsigned long lastSwitched = 0;
 int switchh = servoOffPos;
 
@@ -64,7 +64,7 @@ void loop() {
 
 }
 
-// Interrupt service routine to read the encoder state
+// interrupt service routine to read the encoder state
 void encoder()
 {
   // Wait for encoder contacts to settle

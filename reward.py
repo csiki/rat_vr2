@@ -32,6 +32,7 @@ class RewardCircuit:
         self.auto_mixing_at_every = auto_mixing_at_every  # at every x second it turns 5 times
         self.last_mixing = time.time()
         self.rc_state = None  # last polled state
+        self.has_updated_state = False
 
         # threading
         self.cmd_thread = None
@@ -42,8 +43,21 @@ class RewardCircuit:
         time.sleep(4)  # wait until arduino sets up
         self.send(pressure_setpoint=init_pressure_setpoint)
 
+    def stat(self, verbose=False):
+        cmd = f'STAT'
+        xor_sum = reduce(lambda a, b: a ^ b, map(ord, cmd), 0)
+        cmd = f'${cmd}*{hex(xor_sum)[2:].upper()}'
+
+        if self._can_run():
+            self.ser.write(str.encode(cmd))
+            time.sleep(0.01)  # TODO too slow
+            resp = self.ser.readline().decode()
+            with self.cmd_lock:
+                self.is_running = False
+            self._proc_resp(resp, cmd, verbose)
+
     def send(self, valve_open_ms=0, pressure_setpoint=None, pump_override_ctrl=0,
-             left_blow_ms=0, right_blow_ms=0, mixer_turns=0, verbose=False):
+             left_blow_ms=0, right_blow_ms=0, press_lever_ms=0, mixer_turns=0, verbose=False):
 
         if self.auto_mixing_at_every and mixer_turns == 0 and \
                 time.time() - self.last_mixing > self.auto_mixing_at_every:
@@ -53,28 +67,20 @@ class RewardCircuit:
         kwargs = locals()
         kwargs.pop('self')
 
-        nothing_todo = valve_open_ms + left_blow_ms + right_blow_ms + pump_override_ctrl + mixer_turns == 0 \
+        nothing_todo = valve_open_ms + left_blow_ms + right_blow_ms + pump_override_ctrl + press_lever_ms + mixer_turns == 0 \
                        and pressure_setpoint is None
         if nothing_todo:
             return self.rc_state
 
-        run_it = False
-        with self.cmd_lock:
-            if not self.is_running:
-                if self.cmd_thread:
-                    self.cmd_thread.join()
-                self.is_running = True
-                run_it = True
-            # else:  TODO add commands to queue, not to miss them
-
-        if run_it:
+        if self._can_run():
             self.cmd_thread = threading.Thread(target=self._send, kwargs=kwargs)
             self.cmd_thread.start()
+        # else:  TODO add commands to queue, not to miss them, use concurrent.futures.ThreadPoolExecutor
 
         return self.rc_state
 
     def _send(self, valve_open_ms=0, pressure_setpoint=None, pump_override_ctrl=0,
-                 left_blow_ms=0, right_blow_ms=0, mixer_turns=0, verbose=False):
+                 left_blow_ms=0, right_blow_ms=0, press_lever_ms=0, mixer_turns=0, verbose=False):
         # TODO separate commands
         # TODO have mixer_turns and right/left blows as on-off number of turns or ms to blow
         # TODO run on separate thread
@@ -82,7 +88,7 @@ class RewardCircuit:
         # sticky pressure setpoint
         self.pressure_setpoint = self.pressure_setpoint if pressure_setpoint is None else pressure_setpoint
         cmd = f'DOOM,{valve_open_ms:.0f},{self.pressure_setpoint:.2f},{pump_override_ctrl:.0f},' \
-              f'{left_blow_ms:.0f},{right_blow_ms:.0f},{mixer_turns:.0f}'
+              f'{left_blow_ms:.0f},{right_blow_ms:.0f},{press_lever_ms:.0f},{mixer_turns:.0f}'
 
         xor_sum = reduce(lambda a, b: a ^ b, map(ord, cmd), 0)
         cmd = f'${cmd}*{hex(xor_sum)[2:].upper()}'
@@ -91,6 +97,24 @@ class RewardCircuit:
         time.sleep(0.02)  # TODO remove prints, don't read shit, this is way too slow
 
         resp = self.ser.readline().decode()
+        self._proc_resp(resp, cmd, verbose)
+
+        with self.cmd_lock:
+            self.is_running = False
+        return self.rc_state
+
+    def _can_run(self):
+        run_it = False
+        with self.cmd_lock:
+            if not self.is_running:
+                if self.cmd_thread:
+                    self.cmd_thread.join()
+                self.is_running = True
+                run_it = True
+            # else:  TODO add commands to queue, not to miss them, use concurrent.futures.ThreadPoolExecutor
+        return run_it
+
+    def _proc_resp(self, resp, cmd, verbose=False):
         resp = resp[len(cmd):]  # rm beg
         if verbose:
             print('resp:', resp)
@@ -100,6 +124,7 @@ class RewardCircuit:
                         resp.index(RewardCircuit.RESP_END_STR)].replace(' ', '')
             rc_state = [s.split(':') for s in resp.split('|')]
             self.rc_state = {name: float(val) for name, val in rc_state}
+            self.has_updated_state = True
             # TODO remove response, or have it as an option; we will probably not need it:
             #   or move reading it to a separate thread
             if verbose:
@@ -110,9 +135,12 @@ class RewardCircuit:
             if verbose:
                 print('INVALID RESPONSE:', resp, file=sys.stderr)
 
-        with self.cmd_lock:
-            self.is_running = False
-        return self.rc_state
+    def update_if_havent(self):
+        if not self.has_updated_state:
+            self.stat()
+
+    def reset_state_update_checker(self):
+        self.has_updated_state = False
 
     def open_valve(self, ms: int = None, ul: int = None):
         assert (ms is None) ^ (ul is None)

@@ -1,7 +1,9 @@
+#include <Arduino.h>
 #include <SafeString.h>
 #include <BufferedOutput.h>
 #include <SafeStringReader.h>
 #include <Unistep2.h>
+#include <Servo.h>
 
 createSafeStringReader(sfReader, 80, '\n');  // create a SafeString reader with max Cmd Len 15 and delimiters space, comma, Carrage return and Newline
 
@@ -39,7 +41,26 @@ int j = 0;             // Stepper control flag
 
 bool pumpORflag = false;
 
-// the setup function runs once when you press reset or power the board
+
+// lever stuff
+Servo servo;
+int servoPin = A3;
+int servoOffPos = 120;
+int servoOnPos = 180;
+unsigned long lastLeverPress = 0;
+unsigned long pressTimeMillis = 500;
+unsigned long leverPressOut = 0;  // >=0
+unsigned long pMillisLeverPress = 0;
+int pressLeverFor = 0;
+//int pressLeverPin = A4;
+
+int rotCLK = 6;
+int rotDT = A1;
+int rotSW = A2;
+int rotDebounceDelay = 5;
+int rotPos = 0, rotLastPos = 0, rotLastState;
+
+
 void setup() {
     Serial.begin(57600);
 
@@ -62,6 +83,19 @@ void setup() {
 //    Serial.println("Data format: $DOOM,[Valve Open Millisec(int)],[Pressure SetPoint(float)],[Pump Override Control Millisec(int)],[Left Blow Millisec(int)],[Right Blow Millisec(int)],[Stepper Turns(int)]*CheckSum8Xor");
 //    Serial.println(" e.g.: $DOOM,5000,94.4,5000,2500,3500,3*2C");
 
+    // lever stuff
+    //pinMode(pressLeverPin, OUTPUT);
+    pinMode(servoPin, OUTPUT);
+    servo.attach(servoPin);
+    servo.write(servoOffPos);
+    pinMode(rotDT, INPUT);
+    pinMode(rotSW, INPUT_PULLUP);
+    pinMode(rotCLK, INPUT_PULLUP);
+    digitalWrite(rotCLK, LOW);
+    digitalWrite(rotDT, LOW);
+    digitalWrite(rotSW, LOW);
+    attachInterrupt(digitalPinToInterrupt(rotCLK), encoder, CHANGE);
+    
     bufferedOut.connect(Serial);  // connect bufferedOut to Serial
     sfReader.connect(bufferedOut);
     sfReader.echoOn();         // echo goes out via bufferedOut
@@ -87,7 +121,7 @@ void parseFeedValve(SafeString &dataField) {
     if (!dataField.toInt(msec)) {
         return;  // invalid
     }
-    valveinterval = msec;  // TODO changed to +=, TEST IF WORKS
+    valveinterval = msec;
 }
 void parseFeedPressure(SafeString &dataField) {
     float msec = 0;
@@ -125,6 +159,13 @@ void parseMixerTurns(SafeString &dataField) {
     }
     turns = msec;
 }
+void parseLeverPress(SafeString &dataField) {
+    int msec = 0;
+    if (!dataField.toInt(msec)) {
+        return;  // invalid
+    }
+    pressLeverFor = msec;
+}
 
 // just leaves existing values unchanged if new ones are not valid
 // returns false if msg Not Active
@@ -135,7 +176,7 @@ bool parseDOOM(SafeString &msg) {
     int idx = 0;
     idx = msg.stoken(sfField, idx, delims, returnEmptyFields);
     if (sfField == "$STOP") {  // stop everything
-        valveinterval = pressureSP = pumpORinterval = blowlinterval = blowrinterval = turns = 0;
+        valveinterval = pressureSP = pumpORinterval = blowlinterval = blowrinterval = turns = pressLeverFor = 0;
         pumpORflag = false;
         return true;
     } else if (sfField != "$DOOM") {  // first field should be $DOOM else called with wrong msg
@@ -152,29 +193,39 @@ bool parseDOOM(SafeString &msg) {
     idx = msg.stoken(sfField, idx, delims, returnEmptyFields);
     parseBlowRight(sfField);
     idx = msg.stoken(sfField, idx, delims, returnEmptyFields);
+    parseLeverPress(sfField);
+    idx = msg.stoken(sfField, idx, delims, returnEmptyFields);
     parseMixerTurns(sfField);
     return true;
 }
 
+char printBuf[256];
 void printResponse() {
-    Serial.print(F(" > > > "));
-    Serial.print(F("  "));
-    Serial.print("VLV:");
-    Serial.print(valveinterval);
-    Serial.print("|PSP:");
-    Serial.print(pressureSP);
-    Serial.print("|PMP:");
-    Serial.print(pumpORinterval);
-    Serial.print("|BL:");
-    Serial.print(blowlinterval);
-    Serial.print("|BR:");
-    Serial.print(blowrinterval);
-    Serial.print("|TS:");
-    Serial.print(turns);
-    Serial.print("|P:");
-    Serial.print(pressure);
-    Serial.print(" kPa");
-    Serial.println();
+    
+    sprintf(printBuf, " > > >   VLV:%d|PSP:%d|PMP:%d|BL:%d|BR:%d|LEV:%.2f|TS:%d|P:%.2f kPa",
+        valveinterval, pressureSP, pumpORinterval, blowlinterval, blowrinterval, leverPressOut, turns, pressure);
+    Serial.println(printBuf);
+
+    // Serial.print(F(" > > > "));
+    // Serial.print(F("  "));
+    // Serial.print("VLV:");
+    // Serial.print(valveinterval);
+    // Serial.print("|PSP:");
+    // Serial.print(pressureSP);
+    // Serial.print("|PMP:");
+    // Serial.print(pumpORinterval);
+    // Serial.print("|BL:");
+    // Serial.print(blowlinterval);
+    // Serial.print("|BR:");
+    // Serial.print(blowrinterval);
+    // Serial.print("|LEV:");
+    // Serial.print(leverPressOut);
+    // Serial.print("|TS:");
+    // Serial.print(turns);
+    // Serial.print("|P:");
+    // Serial.print(pressure);
+    // Serial.print(" kPa");
+    // Serial.println();
 }
 
 void feedValve(){
@@ -195,6 +246,10 @@ void blowRight() {
     pMillisblowR = currentMillis;
     digitalWrite(motor3pin5, HIGH);
     digitalWrite(motor3pin6, LOW);
+}
+void pressDatLever() {
+    pMillisLeverPress = currentMillis;
+    servo.write(servoOnPos);
 }
 void mixerControl(){
     j = 0;
@@ -217,6 +272,9 @@ void timerHandler(){
         digitalWrite(motor3pin5, LOW);
         digitalWrite(motor3pin6, LOW);
     }
+    if (currentMillis - pMillisLeverPress >= pressLeverFor) {
+        servo.write(servoOffPos);
+    }
     if (stepper.stepsToGo() == 0 && j < turns) {
         for (int i = 0; i <= 4096; i++) {
             stepper.move(i);
@@ -238,9 +296,12 @@ void processUserInput() {
                     pumpOverride();
                     blowLeft();
                     blowRight();
+                    pressDatLever();
                     printResponse();
                     mixerControl();
                 }
+            } else if (sfReader.startsWith("$STAT")) {
+                printResponse();
             } else {  /* some other msg */ }
         }
     }
@@ -268,12 +329,40 @@ void feedSystem() {
     }
 }
 
-// the loop function runs over and over again forever
+void registerLastLeverPress() {
+    // if (digitalRead(rotSW) == false || rotPos > 0) {
+    if (rotPos > 0)
+        lastLeverPress = currentMillis;
+
+    if (currentMillis - lastLeverPress < pressTimeMillis)
+        leverPressOut = lastLeverPress;
+    else
+        leverPressOut = 0;
+}
+
+
 void loop() {
     currentMillis = millis();
     stepper.run();  // non-blocking stepper driver function
     timerHandler(); // all controls timing
+    registerLastLeverPress();
     bufferedOut.nextByteOut();  // call this one or more times each loop() to release buffered chars
     processUserInput();  // parsing control parameters
     feedSystem();  // background automotion pressurising system
+}
+
+// interrupt service routine to read the encoder state
+void encoder()
+{
+  // Wait for encoder contacts to settle
+  delay(rotDebounceDelay);
+ 
+  // Read the encoder outputs
+  byte rotState = (digitalRead(rotDT) << 1) | digitalRead(rotCLK);
+ 
+  // If the state has changed then update the counter
+  if(rotState != rotLastState)
+      (rotState == 3 || rotState == 0) ? rotPos-- : rotPos++;
+ 
+  rotLastState = rotState;
 }
