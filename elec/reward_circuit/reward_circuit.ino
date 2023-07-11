@@ -202,7 +202,7 @@ bool parseDOOM(SafeString &msg) {
 char printBuf[256];
 void printResponse() {
     
-    sprintf(printBuf, " > > >   VLV:%d|PSP:%d|PMP:%d|BL:%d|BR:%d|LEV:%.2f|TS:%d|P:%.2f kPa",
+    sprintf(printBuf, " > > >   VLV:%d|PSP:%d|PMP:%d|BL:%d|BR:%d|LEV:%d|TS:%d|P:%.2f kPa",
         valveinterval, pressureSP, pumpORinterval, blowlinterval, blowrinterval, leverPressOut, turns, pressure);
     Serial.println(printBuf);
 

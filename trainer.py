@@ -403,7 +403,7 @@ class ManualTrainer(Trainer):
                 self.game.game.set_mode(vizdoom.Mode.PLAYER)
 
             if keyboard.is_pressed(Lever.KEY_SHOOT) and self.lever is not None:
-                self.lever.pull()
+                self.lever.pull()   # TODO it's not the lever, it's reward circuit
                 self.lever_pulled_at = time.time()
 
             time.sleep(0.001)

@@ -12,6 +12,9 @@ from config import *
 # e.g.: $DOOM,5000,94.4,5000,2500,3500,3*2C
 
 
+# TODO redo this, so it runs not in separate thread, but once in loop
+
+
 class RewardCircuit:
     RESP_BEG_STR = ' > > > '
     RESP_END_STR = 'kPa'
@@ -50,11 +53,13 @@ class RewardCircuit:
 
         if self._can_run():
             self.ser.write(str.encode(cmd))
-            time.sleep(0.01)  # TODO too slow
+            time.sleep(0.02)  # TODO too slow
             resp = self.ser.readline().decode()
             with self.cmd_lock:
                 self.is_running = False
             self._proc_resp(resp, cmd, verbose)
+
+        return self.rc_state
 
     def send(self, valve_open_ms=0, pressure_setpoint=None, pump_override_ctrl=0,
              left_blow_ms=0, right_blow_ms=0, press_lever_ms=0, mixer_turns=0, verbose=False):
@@ -115,9 +120,9 @@ class RewardCircuit:
         return run_it
 
     def _proc_resp(self, resp, cmd, verbose=False):
-        resp = resp[len(cmd):]  # rm beg
         if verbose:
             print('resp:', resp)
+        resp = resp[len(cmd):]  # rm beg/echo
 
         try:
             resp = resp[resp.index(RewardCircuit.RESP_BEG_STR) + len(RewardCircuit.RESP_BEG_STR):
@@ -131,9 +136,10 @@ class RewardCircuit:
                 print('cmd:', cmd)
                 print('Reward response:', rc_state)  # TODO
 
-        except ValueError:
+        except ValueError as e:
             if verbose:
                 print('INVALID RESPONSE:', resp, file=sys.stderr)
+                print('Exception:', e)
 
     def update_if_havent(self):
         if not self.has_updated_state:

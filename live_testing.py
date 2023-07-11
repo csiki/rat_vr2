@@ -119,6 +119,7 @@ if __name__ == '__main__':
 
     # pc/server address
     host, port = '192.168.0.129', 4444  # TODO as cmd argument
+    reward_serial_port = '/dev/ttyACM0'
 
     with ServerSocket(host, port) as conn:
 
@@ -141,8 +142,7 @@ if __name__ == '__main__':
         trainer = ArenaTrainer(cspace_path='arena_lowered.map01.pckl', omni_drive=od)  # TODO provide player_movement
         artificial_train_mov = .5  # TODO 1. means movement is defined by omnidrive roll goal, not the sensed motion
 
-        # rew = PiRewardCircuit(conn, 'SERIAL_PORT_ON_PI')  # TODO serial port
-        # TODO lever
+        reward_circuit = PiRewardCircuit(conn, reward_serial_port, auto_mixing_at_every=10)
 
         # setup live plots
         # mov_1_lp = LiveLinePlot(nplots=2, ylim=(-1500, 1500), title='mov1')
@@ -165,14 +165,17 @@ if __name__ == '__main__':
             # run VR devices
             od.loop()
             smooth_flo.loop()
+
             # smooth_flo1.loop()
             # smooth_flo2.loop()
 
             # action
+            # mov = np.array([0, 0, 0])
             mov = smooth_flo.get_vel()
             # mov1 = smooth_flo1.get_vel()
             # mov2 = smooth_flo2.get_vel()
 
+            # phys_mov = mov
             phys_mov = od.motion_to_phys(mov)
             action = (phys_mov, 0)  # TODO lever
             # TODO get current aim from omni drive if any, then mix it up with phys_mov:
@@ -182,13 +185,14 @@ if __name__ == '__main__':
             # step
             state, reward, terminated, truncated, info = doom.step(action)
             game_over = terminated or truncated
-            pm.loop(pos=np.array([state.position_x, state.position_y, state.angle]),
-                    vel=np.array([state.velocity_x, state.velocity_y]))
+            # pm.loop(pos=np.array([state.position_x, state.position_y, state.angle]),
+            #         vel=np.array([state.velocity_x, state.velocity_y]))  # TODO
 
             # update plots
             t = time.time()
             # mov_1_lp.update(t, mov1)
             # mov_2_lp.update(t, mov2)
+
             smooth_mov_lp.update(t, mov)
             phys_mov_lp.update(t, phys_mov * [1, 1, 180/np.pi])
             ingame_mov_lp.update(t, info['action'][:3])

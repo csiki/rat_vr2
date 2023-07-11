@@ -42,15 +42,18 @@ class OmniDrive:
     # FB_FUN_TYPE =
     AXES = 3  # forward/backward, left/right strafe, left/right turn
     PWM_2_MOTION_FUN = lambda x, *p: x * p[0] + p[1]  # uses pwm_to_motion_p params for each axis
+    SIMPLE_DIRS_V = {k: np.array(v) for k, v in {'forward': [1., 0., 0.], 'backward': [-1., 0., 0.],  # v, vn, w
+                                                 'left_strafe': [0., -1., 0.], 'right_strafe': [0., 1., 0.],
+                                                 'left_turn': [0., 0., -1.], 'right_turn': [0., 0., 1.]}.items()}
 
     def __init__(self, roller_pins=ROLLER_PINS, lin_act_pins=LIN_ACT_PINS, up_trans_t=4, down_trans_t=4,
                  auto_mounting=False, pwm_freq=100, calib_path=None):
 
         self.roller_dirs = np.array(['left', 'right'])
-        self.simple_dirs_v = {'forward': [1., 0., 0.], 'backward': [-1., 0., 0.],  # v, vn, w
-                              'left_strafe': [0., -1., 0.], 'right_strafe': [0., 1., 0.],
-                              'left_turn': [0., 0., -1.], 'right_turn': [0., 0., 1.]}
-        self.simple_dirs_v = {k: np.array(v) for k, v in self.simple_dirs_v.items()}
+        # self.simple_dirs_v = {'forward': [1., 0., 0.], 'backward': [-1., 0., 0.],  # v, vn, w
+        #                       'left_strafe': [0., -1., 0.], 'right_strafe': [0., 1., 0.],
+        #                       'left_turn': [0., 0., -1.], 'right_turn': [0., 0., 1.]}
+        # self.simple_dirs_v = {k: np.array(v) for k, v in self.simple_dirs_v.items()}
 
         self.noise_floors = np.zeros(OmniDrive.AXES)  # noise/second; 3 axes
         self.pwm_to_motion_p = np.stack([np.ones(OmniDrive.AXES), np.zeros(OmniDrive.AXES)], axis=1)  # lin fun
@@ -123,8 +126,8 @@ class OmniDrive:
     # getters: nice for reaching variables over socket com
     # (shut up, properties are a hustle, not gonna rename my vars)
 
-    def get_simple_dir_v(self, dir):
-        return self.simple_dirs_v[dir]
+    # def get_simple_dir_v(self, dir):
+    #     return self.simple_dirs_v[dir]
 
     def is_mounted(self):
         return self.mounted
@@ -253,12 +256,12 @@ class OmniDrive:
         return True
 
     def simple_drive(self, simple_dir: str, speed: float = 1., t=None, blocking=False, unmount=False, callback=None):
-        if simple_dir not in self.simple_dirs_v:
-            print(f'Direction {simple_dir} is not any of: {", ".join(self.simple_dirs_v)}!', file=sys.stderr)
+        if simple_dir not in self.SIMPLE_DIRS_V:
+            print(f'Direction {simple_dir} is not any of: {", ".join(self.SIMPLE_DIRS_V)}!', file=sys.stderr)
             return
         print(f'Drive {simple_dir} for {t} seconds at speed {speed:.2f}')
 
-        drive_v = self.simple_dirs_v[simple_dir] * speed
+        drive_v = self.SIMPLE_DIRS_V[simple_dir] * speed
         wheel_dir, wheel_dc = self.calc_wheel_v(drive_v)
         self.current_drive_v = drive_v
         return self.drive(wheel_dir, wheel_dc, t, blocking, unmount, callback)
@@ -390,7 +393,7 @@ class OmniDrive:
 
             for dir_i, dir_ in enumerate(dirs_to_try):
 
-                drive_v = self.simple_dirs_v[dir_] * speed
+                drive_v = self.SIMPLE_DIRS_V[dir_] * speed
                 print(f'go {dir_} at {drive_v}')
                 wheel_dir, wheel_dc, wheel_v, wheel_v_normed = self.calc_wheel_v(drive_v, ret_wheel_v=True)
                 wheel_vs.append(wheel_v)
@@ -462,7 +465,7 @@ class OmniDrive:
                 for pwm in pwms_to_try:
                     print(f'pwm: {pwm:.2f} ...', end=' ', flush=True)
 
-                    drive_v = self.simple_dirs_v[dir_] * pwm
+                    drive_v = self.SIMPLE_DIRS_V[dir_] * pwm
                     wheel_dir, wheel_dc = self.calc_wheel_v(drive_v)
                     drive_vs.append(drive_v)
 
@@ -784,13 +787,13 @@ def ssh_man_drive(omni_drive, speed, check_motion=False):
                     flo.loop()
                     flo.get_rel_motion()
                 print(f'DRIVE {self.key_mapping[key]}..', end='', flush=True)
-                self.current_dir += omni_drive.simple_dirs_v[self.key_mapping[key]]
+                self.current_dir += omni_drive.SIMPLE_DIRS_V[self.key_mapping[key]]
                 wheel_dir, wheel_dc = omni_drive.calc_wheel_v(self.current_dir * speed)
                 omni_drive.drive(wheel_dir, wheel_dc)
 
         def _release(self, key):
             if key in self.key_mapping:
-                self.current_dir -= omni_drive.simple_dirs_v[self.key_mapping[key]]
+                self.current_dir -= omni_drive.SIMPLE_DIRS_V[self.key_mapping[key]]
                 if np.abs(self.current_dir).sum() > 1e-4:
                     wheel_dir, wheel_dc = omni_drive.calc_wheel_v(self.current_dir * speed)
                     omni_drive.drive(wheel_dir, wheel_dc)
@@ -836,13 +839,15 @@ def local_man_drive(omni_drive: OmniDrive, init_speed=.7):  # TODO test !!!
             # compute direction
             for key, direction in key_mapping.items():
                 if keyboard.is_pressed(key):
-                    current_dir += self.omni_drive.get_simple_dir_v(direction)
+                    current_dir += OmniDrive.SIMPLE_DIRS_V[direction]
 
             # set volume
             if keyboard.is_pressed('1'):
                 self.speed = max(.1, self.speed - .1)
+                print('speed decreased to', self.speed)
             elif keyboard.is_pressed('2'):
                 self.speed += min(1., self.speed + .1)
+                print('speed increased to', self.speed)
 
             # (un)mount
             if keyboard.is_pressed('space'):
@@ -861,7 +866,7 @@ def local_man_drive(omni_drive: OmniDrive, init_speed=.7):  # TODO test !!!
                 if current_dir.sum() == 0:
                     self.omni_drive.stop()
                 else:
-                    wheel_dir, wheel_dc = self.omni_drive.calc_wheel_v(current_dir * self.speed)
+                    wheel_dir, wheel_dc = self.omni_drive.calc_wheel_v(current_dir * self.speed)  # TODO MANUAL DRIVE FUCKS SHIT UP
                     self.omni_drive.drive(wheel_dir, wheel_dc)
 
             return current_dir, mount_state
@@ -874,7 +879,7 @@ def main():
     # calibrate args: calibration_path cm_per_game_dist_unit  # TODO argparse
     # test args: calibration_path
     function = sys.argv[1]  # must be 'man', 'calibrate' or 'test'
-    assert function in ['man', 'calib', 'test']
+    assert function in ['man', 'man2', 'calib', 'test']
 
     def get_exit_code(omni_drive: OmniDrive):
         def _exit():
