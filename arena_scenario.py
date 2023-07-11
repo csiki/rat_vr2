@@ -39,7 +39,6 @@ with ServerSocket(host, port) as conn:
     assert od.get('motion_per_cm') is not None and od.get('motion_per_rad') is not None
 
     reward_circuit = PiRewardCircuit(conn, reward_serial_port, auto_mixing_at_every=10)
-    # TODO lever
 
     # setup game
     player_mode = vizdoom.Mode.PLAYER  # vizdoom.Mode.SPECTATOR | vizdoom.Mode.PLAYER
@@ -61,6 +60,7 @@ with ServerSocket(host, port) as conn:
         # run VR devices
         od.loop()
         smooth_flo.loop()
+        reward_circuit.loop()  # TODO test
 
         # action
         mov = smooth_flo.get_vel()

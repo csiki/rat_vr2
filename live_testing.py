@@ -165,6 +165,7 @@ if __name__ == '__main__':
             # run VR devices
             od.loop()
             smooth_flo.loop()
+            reward_circuit.loop()  # TODO TEST !!!
 
             # smooth_flo1.loop()
             # smooth_flo2.loop()
