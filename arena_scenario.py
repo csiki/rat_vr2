@@ -60,14 +60,15 @@ with ServerSocket(host, port) as conn:
         # run VR devices
         od.loop()
         smooth_flo.loop()
-        reward_circuit.loop()  # TODO test
+        rc_state = reward_circuit.loop()
 
         # action
         mov = smooth_flo.get_vel()
         # mov_live_plot.update(time.time(), mov)
 
+        lever = 0 < rc_state['LEV'] < 800
         phys_mov = od.motion_to_phys(mov)
-        action = (phys_mov, 0)  # TODO lever
+        action = (phys_mov, int(lever))
 
         # step
         state, reward, terminated, truncated, info = doom.step(action)
@@ -80,9 +81,9 @@ with ServerSocket(host, port) as conn:
         reward += trainer.give_reward(info['step_i'], state)
 
         # dispense rewards
-        puff_cmd = reward_circuit.calc_puff_from_wall_bump(info['bump_angle'], info['bump_dist'], return_cmd=True)
+        puff_cmd = PiRewardCircuit.calc_puff_from_wall_bump(info['bump_angle'], info['bump_dist'], return_cmd=True)
         reward = max(0., reward)  # positive reinforcement only
-        reward_circuit.send(valve_open_ms=reward, **puff_cmd)
+        reward_circuit.update(valve_open_ms=reward, **puff_cmd)  # TODO ms? ul? which one
 
         # benchmarking
         _end = time.time()

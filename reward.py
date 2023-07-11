@@ -12,15 +12,12 @@ from config import *
 # e.g.: $DOOM,5000,94.4,5000,2500,3500,3*2C
 
 
-# TODO redo this, so it runs not in separate thread, but once in loop
-
-
 class RewardCircuit:
     RESP_BEG_STR = ' > > > '
     RESP_END_STR = 'kPa'
 
     def __init__(self, serial_port, init_pressure_setpoint=PRESSURE_SETPOINT, valve_ms_per_ul=VALVE_MS_PER_UL,
-                 auto_mixing_at_every=None):  # TODO automixing also runs at the end of the round
+                 run_on_sep_thread=True, auto_mixing_at_every=None):  # TODO automixing also runs at the end of the round
         self.pressure_setpoint = init_pressure_setpoint
         self.valve_ms_per_ul = valve_ms_per_ul
         # degree of bump to left/right where the opposite puffer is at 0
@@ -47,6 +44,8 @@ class RewardCircuit:
         self.mixer_turns = 0
         self.do_stop = False
 
+        # threading
+        self.run_on_sep_thread = run_on_sep_thread
         self.thread: threading.Thread = None
 
     def _stat(self, verbose=False):
@@ -82,22 +81,28 @@ class RewardCircuit:
         if not self.do_stop and nothing_todo:
             return
 
+        if self.do_stop:
+            proc = lambda: self._stop()
+        elif nothing_todo:
+            proc = lambda: self._stat(verbose)
+        else:  # there's something to send
+            proc = lambda: self._update(self.valve_open_ms, self.pressure_setpoint, self.pump_override_ctrl,
+                                        self.left_blow_ms,self.right_blow_ms, self.press_lever_ms,
+                                        self.mixer_turns, verbose)
+
         if self.thread.is_alive():
             self.thread.join()
 
-        if self.do_stop:
-            self.thread = threading.Thread(target=lambda: self._stop())
-        if nothing_todo:
-            self.thread = threading.Thread(target=lambda: self._stat(verbose))
-        else:  # there's something to send
-            self.thread = threading.Thread(target=lambda: self._send(self.valve_open_ms, self.pressure_setpoint,
-                                                                     self.pump_override_ctrl, self.left_blow_ms,
-                                                                     self.right_blow_ms, self.press_lever_ms,
-                                                                     self.mixer_turns, verbose))
-        self.thread.start()
+        if self.run_on_sep_thread:
+            self.thread = threading.Thread(target=proc)
+            self.thread.start()
+        else:
+            proc()
 
-    def _send(self, valve_open_ms=0, pressure_setpoint=None, pump_override_ctrl=0,
-                 left_blow_ms=0, right_blow_ms=0, press_lever_ms=0, mixer_turns=0, verbose=False):
+        return self.rc_state
+
+    def _update(self, valve_open_ms=0, pressure_setpoint=None, pump_override_ctrl=0,
+                left_blow_ms=0, right_blow_ms=0, press_lever_ms=0, mixer_turns=0, verbose=False):
 
         # sticky pressure setpoint
         self.pressure_setpoint = self.pressure_setpoint if pressure_setpoint is None else pressure_setpoint
@@ -108,7 +113,7 @@ class RewardCircuit:
         cmd = f'${cmd}*{hex(xor_sum)[2:].upper()}'
         self.ser.write(str.encode(cmd))
 
-        time.sleep(0.02)  # TODO remove prints, don't read shit, this is way too slow
+        time.sleep(0.02)
 
         resp = self.ser.readline().decode()
         self._proc_resp(resp, cmd, verbose)
@@ -123,8 +128,6 @@ class RewardCircuit:
                         resp.index(RewardCircuit.RESP_END_STR)].replace(' ', '')
             rc_state = [s.split(':') for s in resp.split('|')]
             self.rc_state = {name: float(val) for name, val in rc_state}
-            # TODO remove response, or have it as an option; we will probably not need it:
-            #   or move reading it to a separate thread
             if verbose:
                 print('cmd:', cmd)
                 print('Reward response:', rc_state)  # TODO
@@ -140,8 +143,8 @@ class RewardCircuit:
         self.update(valve_open_ms=ms)
 
     @staticmethod
-    def calc_puff_from_wall_bump(b_angle, b_distance, puff_delta_share_degree, puff_within_distance,
-                                 puff_base_dur, return_cmd=False):
+    def calc_puff_from_wall_bump(b_angle, b_distance, puff_delta_share_degree=10, puff_within_distance=1,
+                                 puff_base_dur=100, return_cmd=False):
         # puff rules: at 0 degree both left and right blows at max=1
         #   from -puff_delta_share_degree to 0, a gradient of blow from right from 0 to 1
         #   from puff_delta_share_degree to 0, a gradient of blow from left from 0 to 1

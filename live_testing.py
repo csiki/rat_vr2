@@ -165,7 +165,7 @@ if __name__ == '__main__':
             # run VR devices
             od.loop()
             smooth_flo.loop()
-            reward_circuit.loop()  # TODO TEST !!!
+            rc_state = reward_circuit.loop()  # TODO TEST !!!
 
             # smooth_flo1.loop()
             # smooth_flo2.loop()
@@ -177,8 +177,9 @@ if __name__ == '__main__':
             # mov2 = smooth_flo2.get_vel()
 
             # phys_mov = mov
+            lever = 0 < rc_state['LEV'] < 800
             phys_mov = od.motion_to_phys(mov)
-            action = (phys_mov, 0)  # TODO lever
+            action = (phys_mov, lever)
             # TODO get current aim from omni drive if any, then mix it up with phys_mov:
             #   weight the 2 according to artificial_train_mov;
             #   take the magnitude of phys_mov and translate od.current_drive_v to the same magnitude before weighting
