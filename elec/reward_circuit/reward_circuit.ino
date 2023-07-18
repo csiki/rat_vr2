@@ -200,32 +200,14 @@ bool parseDOOM(SafeString &msg) {
 }
 
 char printBuf[256];
+//char floatFormatBuf[8];
+
 void printResponse() {
     
-    sprintf(printBuf, " > > >   VLV:%d|PSP:%d|PMP:%d|BL:%d|BR:%d|LEV:%d|TS:%d|P:%.2f kPa",
-        valveinterval, pressureSP, pumpORinterval, blowlinterval, blowrinterval, leverPressOut, turns, pressure);
+    sprintf(printBuf, " > > >   VLV:%d|PSP:%d|PMP:%d|BL:%d|BR:%d|LEV:%d|TS:%d|P:%d kPa",
+        valveinterval, (int)pressureSP, pumpORinterval, blowlinterval, blowrinterval,
+        (int)leverPressOut, turns, (int)pressure);
     Serial.println(printBuf);
-
-    // Serial.print(F(" > > > "));
-    // Serial.print(F("  "));
-    // Serial.print("VLV:");
-    // Serial.print(valveinterval);
-    // Serial.print("|PSP:");
-    // Serial.print(pressureSP);
-    // Serial.print("|PMP:");
-    // Serial.print(pumpORinterval);
-    // Serial.print("|BL:");
-    // Serial.print(blowlinterval);
-    // Serial.print("|BR:");
-    // Serial.print(blowrinterval);
-    // Serial.print("|LEV:");
-    // Serial.print(leverPressOut);
-    // Serial.print("|TS:");
-    // Serial.print(turns);
-    // Serial.print("|P:");
-    // Serial.print(pressure);
-    // Serial.print(" kPa");
-    // Serial.println();
 }
 
 void feedValve(){
@@ -329,15 +311,17 @@ void feedSystem() {
     }
 }
 
+// test: $DOOM,0,94.40,0,0,0,800,0*A
 void registerLastLeverPress() {
     // if (digitalRead(rotSW) == false || rotPos > 0) {
-    if (rotPos > 0)
+    if (rotPos > 0 || digitalRead(rotSW) == false)
         lastLeverPress = currentMillis;
 
     if (currentMillis - lastLeverPress < pressTimeMillis)
-        leverPressOut = lastLeverPress;
+        leverPressOut = currentMillis - lastLeverPress + 1;
     else
         leverPressOut = 0;
+    //leverPressOut=100;
 }
 
 
@@ -354,15 +338,15 @@ void loop() {
 // interrupt service routine to read the encoder state
 void encoder()
 {
-  // Wait for encoder contacts to settle
-  delay(rotDebounceDelay);
- 
-  // Read the encoder outputs
-  byte rotState = (digitalRead(rotDT) << 1) | digitalRead(rotCLK);
- 
-  // If the state has changed then update the counter
-  if(rotState != rotLastState)
-      (rotState == 3 || rotState == 0) ? rotPos-- : rotPos++;
- 
-  rotLastState = rotState;
+    // Wait for encoder contacts to settle
+    delay(rotDebounceDelay);
+   
+    // Read the encoder outputs
+    byte rotState = (digitalRead(rotDT) << 1) | digitalRead(rotCLK);
+   
+    // If the state has changed then update the counter
+    if(rotState != rotLastState)
+        (rotState == 3 || rotState == 0) ? rotPos-- : rotPos++;
+   
+    rotLastState = rotState;
 }

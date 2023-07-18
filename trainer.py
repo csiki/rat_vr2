@@ -11,7 +11,7 @@ from collections import namedtuple
 from omni_drive import OmniDrive, local_man_drive
 from player_movement import PlayerMovement, Feedback
 from DOOM import DOOM
-from lever import Lever
+from reward import RewardCircuit
 from threading import Thread
 
 
@@ -344,13 +344,15 @@ class DiscoveryTrainer(Trainer):
 class ManualTrainer(Trainer):
 
     KILL_HAPPENS_WITHIN = 3  # sec after lever pull
+    KEY_SHOOT = '.'  # key to be used for manual shooting
+    PRESS_LEVER_FOR = 800  # ms
 
-    def __init__(self, game: DOOM, omni_drive: OmniDrive, lever: Lever, move_r_per_sec: float, kill_r: float,
-                 r_in_every: float, min_r_given: float = 10., omni_speed=.7):
+    def __init__(self, game: DOOM, omni_drive: OmniDrive, reward_circuit: RewardCircuit,
+                 move_r_per_sec: float, kill_r: float, r_in_every: float, min_r_given: float = 10., omni_speed=.7):
         super().__init__(cspace_path=None, omni_drive=omni_drive)
         self.game = game
         self.omni_drive = omni_drive
-        self.lever = lever
+        self.reward_circuit = reward_circuit
         self.move_r_per_sec = move_r_per_sec
         self.kill_r = kill_r
         self.r_in_every = r_in_every  # sec
@@ -394,7 +396,8 @@ class ManualTrainer(Trainer):
         return r
 
     def _enforce_loop(self):
-        while self.keep_enforcing:
+        # while self.keep_enforcing:
+        if True:
             self.current_drive, mount_state = self.man_drive()
 
             if mount_state == 'mounted':
@@ -402,18 +405,19 @@ class ManualTrainer(Trainer):
             elif mount_state == 'letgo':
                 self.game.game.set_mode(vizdoom.Mode.PLAYER)
 
-            if keyboard.is_pressed(Lever.KEY_SHOOT) and self.lever is not None:
-                self.lever.pull()   # TODO it's not the lever, it's reward circuit
+            if self.reward_circuit is not None and keyboard.is_pressed(ManualTrainer.KEY_SHOOT):
+                self.reward_circuit.update(press_lever_ms=ManualTrainer.PRESS_LEVER_FOR)
                 self.lever_pulled_at = time.time()
 
-            time.sleep(0.001)
+            # time.sleep(0.0001)
 
     def enforce_action(self, step_i, state):
         if not self.enforce_called:  # first call
             self._setup_man_drive()
             self.enforce_called = True
-            self.enforce_thread = Thread(target=self._enforce_loop)
-            self.enforce_thread.start()
+        #     self.enforce_thread = Thread(target=self._enforce_loop)
+        #     self.enforce_thread.start()  # TODO rm thread
+        self._enforce_loop()
 
     def cleanup(self):
         self.keep_enforcing = False

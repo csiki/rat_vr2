@@ -15,6 +15,7 @@ from config import *
 class RewardCircuit:
     RESP_BEG_STR = ' > > > '
     RESP_END_STR = 'kPa'
+    WAIT_TIME = 0.05
 
     def __init__(self, serial_port, init_pressure_setpoint=PRESSURE_SETPOINT, valve_ms_per_ul=VALVE_MS_PER_UL,
                  run_on_sep_thread=True, auto_mixing_at_every=None):  # TODO automixing also runs at the end of the round
@@ -29,24 +30,18 @@ class RewardCircuit:
         self.auto_mixing_at_every = auto_mixing_at_every  # at every x second it turns 5 times
         self.last_mixing = time.time()
         self.rc_state = None  # last polled state
-
-        self.ser = serial.Serial(serial_port, baudrate=57600, timeout=0.05)
-        time.sleep(4)  # wait until arduino sets up
-        self.update(pressure_setpoint=init_pressure_setpoint)
+        self.do_stop = False
 
         # buffer variables
-        self.valve_open_ms = 0
-        self.pressure_setpoint = None
-        self.pump_override_ctrl = 0
-        self.left_blow_ms = 0
-        self.right_blow_ms = 0
-        self.press_lever_ms = 0
-        self.mixer_turns = 0
-        self.do_stop = False
+        self._reset(init_pressure_setpoint)
 
         # threading
         self.run_on_sep_thread = run_on_sep_thread
         self.thread: threading.Thread = None
+
+        self.ser = serial.Serial(serial_port, baudrate=57600, timeout=0.05)
+        time.sleep(4)  # wait until arduino sets up
+        self.update(pressure_setpoint=init_pressure_setpoint)
 
     def _stat(self, verbose=False):
         cmd = f'STAT'
@@ -54,7 +49,7 @@ class RewardCircuit:
         cmd = f'${cmd}*{hex(xor_sum)[2:].upper()}'
 
         self.ser.write(str.encode(cmd))
-        time.sleep(0.02)
+        time.sleep(RewardCircuit.WAIT_TIME)
         resp = self.ser.readline().decode()
         self._proc_resp(resp, cmd, verbose)
 
@@ -87,10 +82,10 @@ class RewardCircuit:
             proc = lambda: self._stat(verbose)
         else:  # there's something to send
             proc = lambda: self._update(self.valve_open_ms, self.pressure_setpoint, self.pump_override_ctrl,
-                                        self.left_blow_ms,self.right_blow_ms, self.press_lever_ms,
+                                        self.left_blow_ms, self.right_blow_ms, self.press_lever_ms,
                                         self.mixer_turns, verbose)
 
-        if self.thread.is_alive():
+        if self.thread is not None and self.thread.is_alive():
             self.thread.join()
 
         if self.run_on_sep_thread:
@@ -99,6 +94,7 @@ class RewardCircuit:
         else:
             proc()
 
+        self._reset(self.pressure_setpoint)
         return self.rc_state
 
     def _update(self, valve_open_ms=0, pressure_setpoint=None, pump_override_ctrl=0,
@@ -113,7 +109,7 @@ class RewardCircuit:
         cmd = f'${cmd}*{hex(xor_sum)[2:].upper()}'
         self.ser.write(str.encode(cmd))
 
-        time.sleep(0.02)
+        time.sleep(RewardCircuit.WAIT_TIME)
 
         resp = self.ser.readline().decode()
         self._proc_resp(resp, cmd, verbose)
@@ -124,6 +120,7 @@ class RewardCircuit:
         resp = resp[len(cmd):]  # rm beg/echo
 
         try:
+            # if True:
             resp = resp[resp.index(RewardCircuit.RESP_BEG_STR) + len(RewardCircuit.RESP_BEG_STR):
                         resp.index(RewardCircuit.RESP_END_STR)].replace(' ', '')
             rc_state = [s.split(':') for s in resp.split('|')]
@@ -136,6 +133,16 @@ class RewardCircuit:
             if verbose:
                 print('INVALID RESPONSE:', resp, file=sys.stderr)
                 print('Exception:', e)
+
+    def _reset(self, init_pressure_setpoint=PRESSURE_SETPOINT):
+        self.valve_open_ms = 0
+        self.pressure_setpoint = init_pressure_setpoint
+        self.pump_override_ctrl = 0
+        self.left_blow_ms = 0
+        self.right_blow_ms = 0
+        self.press_lever_ms = 0
+        self.mixer_turns = 0
+        self.do_stop = False
 
     def open_valve(self, ms: int = None, ul: int = None):
         assert (ms is None) ^ (ul is None)
@@ -173,6 +180,6 @@ class RewardCircuit:
         self.ser.write(str.encode(cmd))
 
     def cleanup(self):
-        self.stop()
+        self._stop()
         time.sleep(0.5)
         self.ser.close()

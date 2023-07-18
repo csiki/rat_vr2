@@ -94,6 +94,8 @@ class PiOverSocket:
         # print('->', cmd)
         self._conn_sock.sendall(pickle.dumps(cmd))
 
+        # time.sleep(0.01)
+
         pi_ret = self._conn_sock.recv(4096)
         # print('<-', len(pi_ret), pi_ret)
         if len(pi_ret) == 0:

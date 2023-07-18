@@ -4,6 +4,7 @@ import numpy
 import inspect
 import pickle
 import socket
+import signal
 import traceback
 from typing import Callable, Any, Union, Tuple, Dict
 from copy import deepcopy
@@ -33,6 +34,12 @@ from pi_wrapper import PiSmoothMotion, PiMotionSensor, PiOverSocket, PiCallback,
 #   no callback possible from pi to pc;
 #     as such, both PlayerMovement and Feedback needs to be on pi to OmniDrive.roll() to work
 
+_RUN = True
+def _sigint():
+    global _RUN
+    _RUN = False
+
+
 def main():
 
     # TODO argparse
@@ -49,12 +56,14 @@ def main():
     device_callback_functions: Dict[int, pi_wrapper.PiCallback] = {}  # host id -> device (wrapped) callback function
     print(f'Listening on {server_host}:{server_port}')
 
+    signal.signal(signal.SIGINT, _sigint)
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         sock.connect((server_host, server_port))
         print(f'Connected to server @ {server_host}:{server_port}..')
 
-        while True:
+        while _RUN:
 
             # receive command
             # cmd example: {'o': id(self), 'c': self.base_cls.__name__, 'f': fun.__name__, 'a': args, 'kwa': kwargs}

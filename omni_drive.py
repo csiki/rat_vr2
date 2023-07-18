@@ -47,7 +47,7 @@ class OmniDrive:
                                                  'left_turn': [0., 0., -1.], 'right_turn': [0., 0., 1.]}.items()}
 
     def __init__(self, roller_pins=ROLLER_PINS, lin_act_pins=LIN_ACT_PINS, up_trans_t=4, down_trans_t=4,
-                 auto_mounting=False, pwm_freq=100, calib_path=None):
+                 auto_mounting=False, mount_init=True, pwm_freq=100, calib_path=None):
 
         self.roller_dirs = np.array(['left', 'right'])
         # self.simple_dirs_v = {'forward': [1., 0., 0.], 'backward': [-1., 0., 0.],  # v, vn, w
@@ -93,6 +93,7 @@ class OmniDrive:
         self.up_trans_t = up_trans_t
         self.down_trans_t = down_trans_t
         self.auto_mounting = auto_mounting
+        self.mount_init = mount_init
         self.mounted = None
 
         self.driving = False
@@ -150,7 +151,7 @@ class OmniDrive:
         self.lin_act.setup()
         print('OmniDrive setup done')
 
-        if self.auto_mounting:  # start in unmounted = rat movement position
+        if self.mount_init:  # start in unmounted = rat movement position
             self.mount(blocking=True)  # make sure the structure won't be raised out-of-bounds
             self.letgo(blocking=True)
         self.mounted = False
@@ -823,7 +824,7 @@ def local_man_drive(omni_drive: OmniDrive, init_speed=.7):  # TODO test !!!
 
     print('drive keymapping:', flush=True)
     print('\n'.join([f'- {k}: {d}' for k, d in key_mapping.items()]))
-    print('to increase/decrease speed press the 1 and 2 number keys')
+    print('to decrease/increase speed press the 1 or 2 number keys')
     print('press space to mount/unmount omni drive')
 
     class _socket_drive():
@@ -846,7 +847,7 @@ def local_man_drive(omni_drive: OmniDrive, init_speed=.7):  # TODO test !!!
                 self.speed = max(.1, self.speed - .1)
                 print('speed decreased to', self.speed)
             elif keyboard.is_pressed('2'):
-                self.speed += min(1., self.speed + .1)
+                self.speed = min(1., self.speed + .1)
                 print('speed increased to', self.speed)
 
             # (un)mount

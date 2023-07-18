@@ -21,7 +21,7 @@ from pi_wrapper import PiSmoothMotion, PiMotionSensor, PiMotionSensors, PiOmniDr
 
 # pc/server address
 host, port = '192.168.0.129', 4444  # TODO as cmd argument or feel automatically
-reward_serial_port = '/dev/ttyACM0'
+reward_serial_port = '/dev/ttyACM0'  # ttyACM0
 
 with ServerSocket(host, port) as conn:
 
@@ -34,11 +34,11 @@ with ServerSocket(host, port) as conn:
     pm = PlayerMovement()
 
     calibration_path = 'omni_calib.pckl'
-    od = PiOmniDrive(conn, auto_mounting=False, calib_path=calibration_path)  # TODO mount_tracking=True
+    od = PiOmniDrive(conn, auto_mounting=False, mount_init=False, calib_path=calibration_path)
     od.setup()
     assert od.get('motion_per_cm') is not None and od.get('motion_per_rad') is not None
 
-    reward_circuit = PiRewardCircuit(conn, reward_serial_port, auto_mixing_at_every=10)
+    reward_circuit = PiRewardCircuit(conn, reward_serial_port, auto_mixing_at_every=10, run_on_sep_thread=False)  # TODO run_on_sep_thread=True test
 
     # setup game
     player_mode = vizdoom.Mode.PLAYER  # vizdoom.Mode.SPECTATOR | vizdoom.Mode.PLAYER
@@ -48,7 +48,7 @@ with ServerSocket(host, port) as conn:
     game_over = False
 
     # setup trainer
-    trainer = ManualTrainer(doom, od, None, move_r_per_sec=20, kill_r=100,
+    trainer = ManualTrainer(doom, od, reward_circuit, move_r_per_sec=20, kill_r=100,
                             r_in_every=.3, min_r_given=10, omni_speed=.75)
 
     # mov_live_plot = LiveLinePlot(nplots=3, ylim=(-1200, 1200))
@@ -60,13 +60,15 @@ with ServerSocket(host, port) as conn:
         # run VR devices
         od.loop()
         smooth_flo.loop()
-        rc_state = reward_circuit.loop()
+        rc_state = reward_circuit.loop(verbose=True)
+        if rc_state is not None:
+            print(rc_state['LEV'])
 
         # action
         mov = smooth_flo.get_vel()
         # mov_live_plot.update(time.time(), mov)
 
-        lever = 0 < rc_state['LEV'] < 800
+        lever = 0 < rc_state['LEV'] < 800 if rc_state is not None else 0
         phys_mov = od.motion_to_phys(mov)
         action = (phys_mov, int(lever))
 

@@ -177,7 +177,7 @@ if __name__ == '__main__':
             # mov2 = smooth_flo2.get_vel()
 
             # phys_mov = mov
-            lever = 0 < rc_state['LEV'] < 800
+            lever = 0 < rc_state['LEV'] < 800 if rc_state is not None else 0
             phys_mov = od.motion_to_phys(mov)
             action = (phys_mov, lever)
             # TODO get current aim from omni drive if any, then mix it up with phys_mov:

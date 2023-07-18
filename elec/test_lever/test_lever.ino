@@ -2,14 +2,14 @@
 
 
 Servo servo;
-int servoPin = A2;
+int servoPin = A3;
 int servoOffPos = 120;
 int servoOnPos = 199;
 unsigned long lastSwitched = 0;
 int switchh = servoOffPos;
 
 int rotCLK = 6;
-int rotDT = A0;
+int rotDT = A2;
 int rotSW = A1;
 int rotDebounceDelay = 5;
 int rotPos = 0, rotLastPos = 0, rotLastState;
@@ -57,7 +57,7 @@ void loop() {
     }
    
     // Check if encoder is pressed
-    if(digitalRead(rotSW) == false)
+    if (digitalRead(rotSW) == false)
       Serial.println("Pressed!");
 
     Serial.println(rotPos);
@@ -67,15 +67,15 @@ void loop() {
 // interrupt service routine to read the encoder state
 void encoder()
 {
-  // Wait for encoder contacts to settle
-  delay(rotDebounceDelay);
- 
-  // Read the encoder outputs
-  byte rotState = (digitalRead(rotDT) << 1) | digitalRead(rotCLK);
- 
-  // If the state has changed then update the counter
-  if(rotState != rotLastState)
-    (rotState == 3 || rotState == 0) ? rotPos-- : rotPos++;
- 
-  rotLastState = rotState;
+    // Wait for encoder contacts to settle
+    delay(rotDebounceDelay);
+   
+    // Read the encoder outputs
+    byte rotState = (digitalRead(rotDT) << 1) | digitalRead(rotCLK);
+   
+    // If the state has changed then update the counter
+    if(rotState != rotLastState)
+      (rotState == 3 || rotState == 0) ? rotPos-- : rotPos++;
+   
+    rotLastState = rotState;
 }
