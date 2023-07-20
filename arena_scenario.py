@@ -38,7 +38,7 @@ with ServerSocket(host, port) as conn:
     od.setup()
     assert od.get('motion_per_cm') is not None and od.get('motion_per_rad') is not None
 
-    reward_circuit = PiRewardCircuit(conn, reward_serial_port, auto_mixing_at_every=10, run_on_sep_thread=False)  # TODO run_on_sep_thread=True test
+    reward_circuit = PiRewardCircuit(conn, reward_serial_port, auto_mixing_at_every=5, run_on_sep_thread=True)  # TODO run_on_sep_thread=True test
 
     # setup game
     player_mode = vizdoom.Mode.PLAYER  # vizdoom.Mode.SPECTATOR | vizdoom.Mode.PLAYER
@@ -60,17 +60,17 @@ with ServerSocket(host, port) as conn:
         # run VR devices
         od.loop()
         smooth_flo.loop()
-        rc_state = reward_circuit.loop(verbose=True)
-        if rc_state is not None:
-            print(rc_state['LEV'])
+        rc_state = reward_circuit.loop(verbose=False)  # TODO verbose False
+        if rc_state and rc_state['LEV'] > 0:
+            print('lev:', rc_state['LEV'])
 
         # action
         mov = smooth_flo.get_vel()
         # mov_live_plot.update(time.time(), mov)
 
-        lever = 0 < rc_state['LEV'] < 800 if rc_state is not None else 0
+        lever = int(0 < rc_state['LEV'] < 300) if rc_state is not None else 0
         phys_mov = od.motion_to_phys(mov)
-        action = (phys_mov, int(lever))
+        action = (phys_mov, lever)
 
         # step
         state, reward, terminated, truncated, info = doom.step(action)
@@ -85,6 +85,8 @@ with ServerSocket(host, port) as conn:
         # dispense rewards
         puff_cmd = PiRewardCircuit.calc_puff_from_wall_bump(info['bump_angle'], info['bump_dist'], return_cmd=True)
         reward = max(0., reward)  # positive reinforcement only
+        if reward > 0:
+            print('REWARD:', reward)
         reward_circuit.update(valve_open_ms=reward, **puff_cmd)  # TODO ms? ul? which one
 
         # benchmarking

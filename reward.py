@@ -15,10 +15,11 @@ from config import *
 class RewardCircuit:
     RESP_BEG_STR = ' > > > '
     RESP_END_STR = 'kPa'
-    WAIT_TIME = 0.05
+    BAUDRATE = 57600
+    WAIT_TIME = .08  # sec TODO
 
     def __init__(self, serial_port, init_pressure_setpoint=PRESSURE_SETPOINT, valve_ms_per_ul=VALVE_MS_PER_UL,
-                 run_on_sep_thread=True, auto_mixing_at_every=None):  # TODO automixing also runs at the end of the round
+                 run_on_sep_thread=True, auto_mixing_at_every=None, run_stat_in_every=0.08):  # TODO optimize run_stat_in_every and WAIT_TIME !!!
         self.pressure_setpoint = init_pressure_setpoint
         self.valve_ms_per_ul = valve_ms_per_ul
         # degree of bump to left/right where the opposite puffer is at 0
@@ -30,7 +31,12 @@ class RewardCircuit:
         self.auto_mixing_at_every = auto_mixing_at_every  # at every x second it turns 5 times
         self.last_mixing = time.time()
         self.rc_state = None  # last polled state
+        self.rc_state_mut = []
         self.do_stop = False
+        self.pressure_setpoint_changed = False
+
+        self.run_stat_in_every = run_stat_in_every
+        self.stat_last_run = 0
 
         # buffer variables
         self._reset(init_pressure_setpoint)
@@ -39,22 +45,14 @@ class RewardCircuit:
         self.run_on_sep_thread = run_on_sep_thread
         self.thread: threading.Thread = None
 
-        self.ser = serial.Serial(serial_port, baudrate=57600, timeout=0.05)
+        self.ser = serial.Serial(serial_port, baudrate=RewardCircuit.BAUDRATE, timeout=RewardCircuit.WAIT_TIME)
         time.sleep(4)  # wait until arduino sets up
         self.update(pressure_setpoint=init_pressure_setpoint)
 
-    def _stat(self, verbose=False):
-        cmd = f'STAT'
-        xor_sum = reduce(lambda a, b: a ^ b, map(ord, cmd), 0)
-        cmd = f'${cmd}*{hex(xor_sum)[2:].upper()}'
-
-        self.ser.write(str.encode(cmd))
-        time.sleep(RewardCircuit.WAIT_TIME)
-        resp = self.ser.readline().decode()
-        self._proc_resp(resp, cmd, verbose)
-
     def update(self, valve_open_ms=0, pressure_setpoint=None, pump_override_ctrl=0,
                left_blow_ms=0, right_blow_ms=0, press_lever_ms=0, mixer_turns=0):
+        if pressure_setpoint is not None:
+            self.pressure_setpoint_changed = True
         self.valve_open_ms = self.valve_open_ms + valve_open_ms
         self.pressure_setpoint = pressure_setpoint if pressure_setpoint is not None else self.pressure_setpoint
         self.pump_override_ctrl = pump_override_ctrl
@@ -63,27 +61,33 @@ class RewardCircuit:
         self.press_lever_ms = max(self.press_lever_ms, press_lever_ms)
         self.mixer_turns = max(self.mixer_turns, mixer_turns)
 
-    def loop(self, verbose=False):  # TODO TEST !!!!
+    def loop(self, verbose=False):
         if self.auto_mixing_at_every and self.mixer_turns == 0\
                 and time.time() - self.last_mixing > self.auto_mixing_at_every:
             self.last_mixing = time.time()
             self.mixer_turns = 5
 
         nothing_todo = (self.valve_open_ms + self.left_blow_ms + self.right_blow_ms + self.pump_override_ctrl +
-                        self.press_lever_ms + self.mixer_turns) == 0 \
-                       and self.pressure_setpoint is None
+                        self.press_lever_ms + self.mixer_turns) == 0 and not self.pressure_setpoint_changed
 
-        if not self.do_stop and nothing_todo:
-            return
-
+        proc = None
         if self.do_stop:
             proc = lambda: self._stop()
-        elif nothing_todo:
-            proc = lambda: self._stat(verbose)
-        else:  # there's something to send
+        elif nothing_todo and time.time() - self.stat_last_run > self.run_stat_in_every:
+            proc = lambda: self._stat(verbose, self.rc_state_mut)
+        elif not nothing_todo:  # there's something to send
             proc = lambda: self._update(self.valve_open_ms, self.pressure_setpoint, self.pump_override_ctrl,
                                         self.left_blow_ms, self.right_blow_ms, self.press_lever_ms,
-                                        self.mixer_turns, verbose)
+                                        self.mixer_turns, verbose, self.rc_state_mut)
+
+        if len(self.rc_state_mut) > 0:
+            self.rc_state = self.rc_state_mut[-1]
+            self.rc_state_mut.clear()
+
+        if proc:
+            self.stat_last_run = time.time()
+        else:  # nothing to do
+            return
 
         if self.thread is not None and self.thread.is_alive():
             self.thread.join()
@@ -97,8 +101,20 @@ class RewardCircuit:
         self._reset(self.pressure_setpoint)
         return self.rc_state
 
+    def _stat(self, verbose=False, rc_state_out: list = None):
+        cmd = f'STAT'
+        xor_sum = reduce(lambda a, b: a ^ b, map(ord, cmd), 0)
+        cmd = f'${cmd}*{hex(xor_sum)[2:].upper()}'
+        self.ser.write(str.encode(cmd))
+        time.sleep(RewardCircuit.WAIT_TIME)
+
+        resp = self.ser.readline().decode()
+        rc_state = self._proc_resp(resp, cmd, verbose)
+        rc_state_out.append(rc_state)
+
     def _update(self, valve_open_ms=0, pressure_setpoint=None, pump_override_ctrl=0,
-                left_blow_ms=0, right_blow_ms=0, press_lever_ms=0, mixer_turns=0, verbose=False):
+                left_blow_ms=0, right_blow_ms=0, press_lever_ms=0, mixer_turns=0, verbose=False,
+                rc_state_out: list = None):
 
         # sticky pressure setpoint
         self.pressure_setpoint = self.pressure_setpoint if pressure_setpoint is None else pressure_setpoint
@@ -108,23 +124,25 @@ class RewardCircuit:
         xor_sum = reduce(lambda a, b: a ^ b, map(ord, cmd), 0)
         cmd = f'${cmd}*{hex(xor_sum)[2:].upper()}'
         self.ser.write(str.encode(cmd))
-
         time.sleep(RewardCircuit.WAIT_TIME)
 
         resp = self.ser.readline().decode()
-        self._proc_resp(resp, cmd, verbose)
+        rc_state = self._proc_resp(resp, cmd, verbose)
+        rc_state_out.append(rc_state)
 
     def _proc_resp(self, resp, cmd, verbose=False):
         if verbose:
             print('resp:', resp)
         resp = resp[len(cmd):]  # rm beg/echo
 
+        rc_state = None
         try:
             # if True:
             resp = resp[resp.index(RewardCircuit.RESP_BEG_STR) + len(RewardCircuit.RESP_BEG_STR):
                         resp.index(RewardCircuit.RESP_END_STR)].replace(' ', '')
             rc_state = [s.split(':') for s in resp.split('|')]
-            self.rc_state = {name: float(val) for name, val in rc_state}
+            rc_state = {name: float(val) for name, val in rc_state}
+            # self.rc_state = rc_state
             if verbose:
                 print('cmd:', cmd)
                 print('Reward response:', rc_state)  # TODO
@@ -133,6 +151,8 @@ class RewardCircuit:
             if verbose:
                 print('INVALID RESPONSE:', resp, file=sys.stderr)
                 print('Exception:', e)
+
+        return rc_state
 
     def _reset(self, init_pressure_setpoint=PRESSURE_SETPOINT):
         self.valve_open_ms = 0
@@ -143,6 +163,7 @@ class RewardCircuit:
         self.press_lever_ms = 0
         self.mixer_turns = 0
         self.do_stop = False
+        self.pressure_setpoint_changed = False
 
     def open_valve(self, ms: int = None, ul: int = None):
         assert (ms is None) ^ (ul is None)

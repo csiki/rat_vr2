@@ -35,7 +35,7 @@ from pi_wrapper import PiSmoothMotion, PiMotionSensor, PiOverSocket, PiCallback,
 #     as such, both PlayerMovement and Feedback needs to be on pi to OmniDrive.roll() to work
 
 _RUN = True
-def _sigint():
+def _sigint(*args):
     global _RUN
     _RUN = False
 

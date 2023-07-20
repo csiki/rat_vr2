@@ -55,8 +55,8 @@ int pressLeverFor = 0;
 //int pressLeverPin = A4;
 
 int rotCLK = 6;
-int rotDT = A1;
-int rotSW = A2;
+int rotDT = A2;  // artificially switched A1, A2 here; but it works
+int rotSW = A1;
 int rotDebounceDelay = 5;
 int rotPos = 0, rotLastPos = 0, rotLastState;
 
