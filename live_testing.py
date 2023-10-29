@@ -135,7 +135,7 @@ if __name__ == '__main__':
         pm = PlayerMovement(smooth_dt=.1)
 
         calibration_path = 'omni_calib.pckl'
-        od = PiOmniDrive(conn, auto_mounting=False, calib_path=calibration_path)  # TODO mount_tracking=True or nah
+        od = PiOmniDrive(conn, auto_mounting=False, calib_path=calibration_path)
         od.setup()
         assert od.get('motion_per_cm') is not None and od.get('motion_per_rad') is not None
 

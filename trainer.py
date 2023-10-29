@@ -285,10 +285,11 @@ class ArenaTrainer(Trainer):
 
     def _get_exec_kill(self, start_state) -> Callable[[Any], Any]:
         def _fun(state):
-            self.lever.pull()  # TODO depends on lever interface
+            raise NotImplementedError()
+            self.lever.pull()  # TODO have access to reward_curcuit here, then call proper function
         return _fun
 
-    def enforce_action(self, step_i, state):  # TODO !!! test
+    def enforce_action(self, step_i, state):  # TODO test
         pos = (state.position_x, state.position_y)
         self.last_movement_t = time.time() if self.last_pos != pos else self.last_movement_t
         train_state = self._get_train_state(state)
@@ -345,7 +346,9 @@ class ManualTrainer(Trainer):
 
     KILL_HAPPENS_WITHIN = 3  # sec after lever pull
     KEY_SHOOT = '.'  # key to be used for manual shooting
-    PRESS_LEVER_FOR = 800  # ms
+    PRESS_LEVER_FOR = 600  # ms
+    KEY_REWARD = 'r'  # gives reward
+    GIVE_MAN_REWARD_FOR = 100  # ms
 
     def __init__(self, game: DOOM, omni_drive: OmniDrive, reward_circuit: RewardCircuit,
                  move_r_per_sec: float, kill_r: float, r_in_every: float, min_r_given: float = 10., omni_speed=.7):
@@ -368,6 +371,8 @@ class ManualTrainer(Trainer):
         self.last_move_rewarded = time.time()
         self.move_r = 0.
         self.kill_count = 0
+
+        self.man_reward = 0
 
         # use self.game.set_mode() to set it to vizdoom.Mode.SPECTATOR when rat is under control
         #   every enforce_action() call check keyboard key presses, and if pressed space it changes to control mode
@@ -394,11 +399,13 @@ class ManualTrainer(Trainer):
             self.lever_pulled_at = time.time() - 2 * ManualTrainer.KILL_HAPPENS_WITHIN
             r += self.kill_r
 
+        r += self.man_reward
+        self.man_reward = 0
+
         return r
 
     def _enforce_loop(self):
-        # while self.keep_enforcing:
-        if True:
+        if self.keep_enforcing:
             self.current_drive, mount_state = self.man_drive()
 
             if mount_state == 'mounted':
@@ -410,14 +417,13 @@ class ManualTrainer(Trainer):
                 self.reward_circuit.update(press_lever_ms=ManualTrainer.PRESS_LEVER_FOR)
                 self.lever_pulled_at = time.time()
 
-            # time.sleep(0.0001)
+            if self.reward_circuit is not None and keyboard.is_pressed(ManualTrainer.KEY_REWARD):
+                self.man_reward = ManualTrainer.GIVE_MAN_REWARD_FOR
 
     def enforce_action(self, step_i, state):
         if not self.enforce_called:  # first call
             self._setup_man_drive()
             self.enforce_called = True
-        #     self.enforce_thread = Thread(target=self._enforce_loop)
-        #     self.enforce_thread.start()  # TODO rm thread
         self._enforce_loop()
 
     def cleanup(self):

@@ -16,10 +16,10 @@ class RewardCircuit:
     RESP_BEG_STR = ' > > > '
     RESP_END_STR = 'kPa'
     BAUDRATE = 57600
-    WAIT_TIME = .08  # sec TODO
+    WAIT_TIME = .06  # sec
 
     def __init__(self, serial_port, init_pressure_setpoint=PRESSURE_SETPOINT, valve_ms_per_ul=VALVE_MS_PER_UL,
-                 run_on_sep_thread=True, auto_mixing_at_every=None, run_stat_in_every=0.08):  # TODO optimize run_stat_in_every and WAIT_TIME !!!
+                 run_on_sep_thread=True, auto_mixing_at_every=None, run_stat_in_every=0.1):
         self.pressure_setpoint = init_pressure_setpoint
         self.valve_ms_per_ul = valve_ms_per_ul
         # degree of bump to left/right where the opposite puffer is at 0
@@ -62,7 +62,7 @@ class RewardCircuit:
         self.mixer_turns = max(self.mixer_turns, mixer_turns)
 
     def loop(self, verbose=False):
-        if self.auto_mixing_at_every and self.mixer_turns == 0\
+        if self.auto_mixing_at_every and self.mixer_turns == 0 \
                 and time.time() - self.last_mixing > self.auto_mixing_at_every:
             self.last_mixing = time.time()
             self.mixer_turns = 5
@@ -73,12 +73,12 @@ class RewardCircuit:
         proc = None
         if self.do_stop:
             proc = lambda: self._stop()
-        elif nothing_todo and time.time() - self.stat_last_run > self.run_stat_in_every:
-            proc = lambda: self._stat(verbose, self.rc_state_mut)
         elif not nothing_todo:  # there's something to send
             proc = lambda: self._update(self.valve_open_ms, self.pressure_setpoint, self.pump_override_ctrl,
                                         self.left_blow_ms, self.right_blow_ms, self.press_lever_ms,
                                         self.mixer_turns, verbose, self.rc_state_mut)
+        elif nothing_todo and time.time() - self.stat_last_run > self.run_stat_in_every:
+            proc = lambda: self._stat(verbose, self.rc_state_mut)
 
         if len(self.rc_state_mut) > 0:
             self.rc_state = self.rc_state_mut[-1]
@@ -145,7 +145,7 @@ class RewardCircuit:
             # self.rc_state = rc_state
             if verbose:
                 print('cmd:', cmd)
-                print('Reward response:', rc_state)  # TODO
+                print('Reward response:', rc_state)
 
         except ValueError as e:
             if verbose:

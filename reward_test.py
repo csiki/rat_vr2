@@ -35,19 +35,6 @@ if __name__ == '__main__':
     with ServerSocket(host, port) as conn:
         reward_circuit = PiRewardCircuit(conn, serial_port)
 
-
-
-        # TODO !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        #   when calling pioversocket objects, the connection breaks, possibly because it's being done from multiple
-        #   threads and e.g. in omni_drive/local_man_drive/_socket_drive/__call__, the socket state on that separate
-        #   thread might not be setup, so it first needs to be opened there as well (?)
-
-        # TODO another issue is the reward_circuit not responding properly and as such its state cannot be retrieved
-        #   ... see below here
-
-
-
-
         rc_state = reward_circuit.send(pressure_setpoint=100)
 
         rc_state = reward_circuit.stat(verbose=True)

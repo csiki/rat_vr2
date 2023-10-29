@@ -47,8 +47,6 @@ class PiOverSocket:
                 f = self._get_fun(fun)
                 f.__name__ = fun_name
                 setattr(self, fun_name, f)
-                # TODO if loop is slow, could create async version of each function, naming them f'async_{fun_name}'
-                #   + implement below _async_send_cm() and _async_get_fun() AND add them above to prohibited funs above
 
         # get and set members functions, call the __getattribute__ and __setattr__ on the other side
         g = self._get_fun(self.__getattribute__)

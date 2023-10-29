@@ -48,7 +48,7 @@ def main():
     server_port = int(sys.argv[2]) if len(sys.argv) > 2 else 4444
     do_restart = bool(sys.argv[3]) if len(sys.argv) > 3 else False
 
-    # devices  # TODO add lever, reward, trainer
+    # devices
     device_clss = [MotionSensor, MotionSensors, SmoothMotion, OmniDrive, LinActuator, PlayerMovement, Feedback, RewardCircuit]
     device_cls_names = [cls.__name__ for cls in device_clss]
     device_objs = [dict() for _ in device_clss]  # host id  -> device obj for each class

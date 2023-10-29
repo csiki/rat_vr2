@@ -38,7 +38,7 @@ with ServerSocket(host, port) as conn:
     od.setup()
     assert od.get('motion_per_cm') is not None and od.get('motion_per_rad') is not None
 
-    reward_circuit = PiRewardCircuit(conn, reward_serial_port, auto_mixing_at_every=5, run_on_sep_thread=True)  # TODO run_on_sep_thread=True test
+    reward_circuit = PiRewardCircuit(conn, reward_serial_port, auto_mixing_at_every=5, run_on_sep_thread=True)
 
     # setup game
     player_mode = vizdoom.Mode.PLAYER  # vizdoom.Mode.SPECTATOR | vizdoom.Mode.PLAYER
@@ -49,7 +49,7 @@ with ServerSocket(host, port) as conn:
 
     # setup trainer
     trainer = ManualTrainer(doom, od, reward_circuit, move_r_per_sec=20, kill_r=100,
-                            r_in_every=.3, min_r_given=10, omni_speed=.75)
+                            r_in_every=.5, min_r_given=10, omni_speed=.75)
 
     # mov_live_plot = LiveLinePlot(nplots=3, ylim=(-1200, 1200))
     loop_ts = []
@@ -60,7 +60,8 @@ with ServerSocket(host, port) as conn:
         # run VR devices
         od.loop()
         smooth_flo.loop()
-        rc_state = reward_circuit.loop(verbose=False)  # TODO verbose False
+        rc_state = reward_circuit.loop(verbose=False)
+
         # if rc_state and rc_state['LEV'] > 0:
         #     print('lev:', rc_state['LEV'])
 
@@ -68,7 +69,7 @@ with ServerSocket(host, port) as conn:
         mov = smooth_flo.get_vel()
         # mov_live_plot.update(time.time(), mov)
 
-        lever = int(0 < rc_state['LEV'] < 300) if rc_state is not None else 0
+        lever = int(0 < rc_state['LEV'] < 100) if rc_state is not None else 0
         phys_mov = od.motion_to_phys(mov)
         action = (phys_mov, lever)
 
@@ -89,7 +90,7 @@ with ServerSocket(host, port) as conn:
         reward = max(0., reward)  # positive reinforcement only
         if reward > 0:
             print('REWARD:', reward)
-        reward_circuit.update(valve_open_ms=reward, **puff_cmd)  # TODO ms? ul? which one
+        reward_circuit.update(valve_open_ms=reward, **puff_cmd)  # reward in ms for now
 
         # benchmarking
         _end = time.time()
@@ -98,5 +99,7 @@ with ServerSocket(host, port) as conn:
 
         if info['step_i'] % 100 == 0:
             print('avg loop time:', np.mean(loop_ts) * 1000)
+            # plt.hist(loop_ts, bins=30)
+            # plt.show()
 
     trainer.cleanup()

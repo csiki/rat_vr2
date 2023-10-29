@@ -37,8 +37,6 @@ class OmniDrive:
                         'w': 'forward', 's': 'backward', 'd': 'right_strafe', 'a': 'left_strafe',
                         'k': 'left_turn', 'l': 'right_turn'}
 
-    # TODO integrate manual mode into OmniDrive, so it can be activated, so user can test it in game, with keymapping ?
-
     # FB_FUN_TYPE =
     AXES = 3  # forward/backward, left/right strafe, left/right turn
     PWM_2_MOTION_FUN = lambda x, *p: x * p[0] + p[1]  # uses pwm_to_motion_p params for each axis
@@ -60,7 +58,7 @@ class OmniDrive:
         self.pwm_to_motion_scaler = np.ones(OmniDrive.AXES)  # scaler to translate motion/sec; no bias like above here
         self.pwm_to_motion_min_pwm = np.zeros(OmniDrive.AXES)
 
-        # TODO last calibration:
+        # last calibration:
         self.noise_floors = np.array([918.89, 2866.23, 1487.46])
         self.pwm_to_motion_min_pwm = np.array([0.4, 0.6, 0.3])
         self.pwm_to_motion_p = np.array([[10652.57, -3037.57], [13279.69, -5839.49], [8550.87, -545.12]])
@@ -105,7 +103,7 @@ class OmniDrive:
         self.lin_act = LinActuator(lin_act_pins)
 
         # update already calibrated vars
-        if calib_path:  # TODO use get and setattr; this is ugly
+        if calib_path:
             with open(calib_path, 'rb') as f:
                 calib = pickle.load(f)
             self.noise_floors = calib['noise_floors']
@@ -158,7 +156,7 @@ class OmniDrive:
 
         self.got_set_up = True
 
-    def save(self, calib_path):  # TODO use get and setattr; this is ugly
+    def save(self, calib_path):
         calib = {'noise_floors': self.noise_floors, 'pwm_to_motion_p': self.pwm_to_motion_p,
                  'pid_p': self.pid_p, 'pid_dt': self.pid_dt, 'pid_err_scalers': self.pid_err_scalers,
                  'trans_mx': self.trans_mx, 'motion_per_rad': self.motion_per_rad, 'motion_per_cm': self.motion_per_cm,
@@ -315,8 +313,8 @@ class OmniDrive:
             neg_err = -feedback()  # the negative error, which enables the constant 0 setpoint
 
             # when done
-            if np.abs(np.max(neg_err)) < eps or not od.rolling:  # TODO should angle be handled differently or always used as degree not radian at least..
-                od.stop(unmount)  # od.rolling -> False  # TODO see if od is actually seen here as outer self
+            if np.abs(np.max(neg_err)) < eps or not od.rolling:
+                od.stop(unmount)  # od.rolling -> False
                 if callback:
                     callback()
                 return
@@ -361,7 +359,7 @@ class OmniDrive:
         # scales motion sensor detected movement into physical units (cm and rad)
         # only works properly if calibrate_full_rot() has run i.e. motion_per_rad motion_per_cm are defined
         movement = np.array(movement)
-        movement[:-1] /= self.motion_per_cm  # TODO !made it too slow? also in doom.step()
+        movement[:-1] /= self.motion_per_cm
         movement[-1] /= self.motion_per_rad
         return movement
 
@@ -374,7 +372,7 @@ class OmniDrive:
         flo = MotionSensors(flo1, flo2)
         drive_t = 5
         niter = 50
-        speed = 0.9  # TODO lower maybe when motors work fine
+        speed = 0.8
         dirs_to_try = ['forward', 'backward', 'left_strafe', 'right_strafe', 'left_turn', 'right_turn']
 
         # setup nn
@@ -705,7 +703,7 @@ def calibrate(omni_drive, calibration_path, **calib_kwargs):
 
     # calibrate
     print('Calibrate transfer function..')
-    omni_drive.calibrate_transfer_fun()  # TODO
+    omni_drive.calibrate_transfer_fun()
     print('Calibrate speed..')
     omni_drive.calibrate_speed()
     print('Calibrate full rotation..')
@@ -819,7 +817,7 @@ def ssh_man_drive(omni_drive, speed, check_motion=False):
     omni_drive.cleanup()
 
 
-def local_man_drive(omni_drive: OmniDrive, init_speed=.7):  # TODO test !!!
+def local_man_drive(omni_drive: OmniDrive, init_speed=.7):
     key_mapping = OmniDrive.KEYBOARD_MAPPING
 
     print('drive keymapping:', flush=True)
@@ -867,7 +865,7 @@ def local_man_drive(omni_drive: OmniDrive, init_speed=.7):  # TODO test !!!
                 if current_dir.sum() == 0:
                     self.omni_drive.stop()
                 else:
-                    wheel_dir, wheel_dc = self.omni_drive.calc_wheel_v(current_dir * self.speed)  # TODO MANUAL DRIVE FUCKS SHIT UP
+                    wheel_dir, wheel_dc = self.omni_drive.calc_wheel_v(current_dir * self.speed)
                     self.omni_drive.drive(wheel_dir, wheel_dc)
 
             return current_dir, mount_state
@@ -898,7 +896,7 @@ def main():
         if function == 'man':
             ssh_man_drive(omni_drive, speed)
         elif function == 'man2':
-            drive = local_man_drive(omni_drive, speed)  # TODO test
+            drive = local_man_drive(omni_drive, speed)
             while True:
                 drive()
 
@@ -922,4 +920,4 @@ def main():
 
 if __name__ == '__main__':
     # exit()
-    main()  # TODO
+    main()

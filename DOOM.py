@@ -8,11 +8,9 @@ import vizdoom
 from vizdoom import DoomGame, Button, GameVariable, ScreenFormat, ScreenResolution, AutomapMode, Mode
 
 
-# TODO minimize sliding:
-#   https://forum.zdoom.org/viewtopic.php?p=933227&sid=fdef5121aec04509a2b76c8048ea5cc5#p933227
+# minimize sliding: https://forum.zdoom.org/viewtopic.php?p=933227&sid=fdef5121aec04509a2b76c8048ea5cc5#p933227
 
 # TODO make feedback() used in omnidrive a class object that stores the game setpoint and ways to call for current pos
-
 # TODO LATER: make DOOM a subclass of a abstract class (GAME) to generalize over games
 from gym.core import RenderFrame, ActType, ObsType
 
@@ -171,8 +169,8 @@ class DOOM(gym.Env):
         # action
         if self.cfg['mode'] == Mode.PLAYER:
             move, shoot = np.array(action[0]), action[1]  # cpy move before altered
-            move[:2] = move[:2] / self.map_unit_per_cm  # / self.tic_per_sec * self.map_unit_per_cm  # TODO !this made it too slow! todo * self.cfg['skiprate'] ?
-            move[2] = move[2] * self.map_degree_per_rad  # TODO !this made it too slow!
+            move[:2] = move[:2] / self.map_unit_per_cm  # / self.tic_per_sec * self.map_unit_per_cm
+            move[2] = move[2] * self.map_degree_per_rad
             action = move.tolist() + [shoot]
             reward = self.game.make_action(action, self.cfg['skiprate'])
         elif self.cfg['mode'] == Mode.SPECTATOR:
