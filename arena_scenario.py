@@ -61,8 +61,8 @@ with ServerSocket(host, port) as conn:
         od.loop()
         smooth_flo.loop()
         rc_state = reward_circuit.loop(verbose=False)  # TODO verbose False
-        if rc_state and rc_state['LEV'] > 0:
-            print('lev:', rc_state['LEV'])
+        # if rc_state and rc_state['LEV'] > 0:
+        #     print('lev:', rc_state['LEV'])
 
         # action
         mov = smooth_flo.get_vel()
@@ -79,6 +79,8 @@ with ServerSocket(host, port) as conn:
                 vel=np.array([state.velocity_x, state.velocity_y]))
 
         # train
+        if reward > 0:
+            print('gameREWARD:', reward)
         trainer.enforce_action(info['step_i'], state)
         reward += trainer.give_reward(info['step_i'], state)
 

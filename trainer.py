@@ -390,6 +390,7 @@ class ManualTrainer(Trainer):
 
         if state.kill_count > self.kill_count and \
                 time.time() - self.lever_pulled_at < ManualTrainer.KILL_HAPPENS_WITHIN:
+            self.kill_count = state.kill_count
             self.lever_pulled_at = time.time() - 2 * ManualTrainer.KILL_HAPPENS_WITHIN
             r += self.kill_r
 

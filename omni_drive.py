@@ -891,7 +891,7 @@ def main():
     if function.startswith('man'):
         speed = float(sys.argv[2]) if len(sys.argv) > 2 else .7
         calibration_path = sys.argv[3] if len(sys.argv) > 3 else None
-        omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4, calib_path=calibration_path)
+        omni_drive = OmniDrive(up_trans_t=4, down_trans_t=4, calib_path=calibration_path, mount_init=False)
         omni_drive.setup()
         signal.signal(signal.SIGINT, get_exit_code(omni_drive))
 
