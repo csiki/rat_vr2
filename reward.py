@@ -133,7 +133,7 @@ class RewardCircuit:
     def _proc_resp(self, resp, cmd, verbose=False):
         if verbose:
             print('resp:', resp)
-        resp = resp[len(cmd):]  # rm beg/echo
+        # resp = resp[len(cmd):]  # rm beg/echo
 
         rc_state = None
         try:

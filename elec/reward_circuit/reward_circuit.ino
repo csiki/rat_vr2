@@ -7,7 +7,7 @@
 
 createSafeStringReader(sfReader, 80, '\n');  // create a SafeString reader with max Cmd Len 15 and delimiters space, comma, Carrage return and Newline
 
-//Example of using BufferedOutput to release bytes when there is space in the Serial Tx buffer, extra buffer size 80
+// Example of using BufferedOutput to release bytes when there is space in the Serial Tx buffer, extra buffer size 80
 createBufferedOutput(bufferedOut, 80, DROP_UNTIL_EMPTY);
 Unistep2 stepper(2, 4, 7, 8, 4096, 1000);
 
@@ -98,7 +98,7 @@ void setup() {
     
     bufferedOut.connect(Serial);  // connect bufferedOut to Serial
     sfReader.connect(bufferedOut);
-    sfReader.echoOn();         // echo goes out via bufferedOut
+    sfReader.echoOff();         // echo goes out via bufferedOut
     sfReader.setTimeout(100);  // set 100ms == 0.1sec non-blocking timeout
 }
 
@@ -330,7 +330,7 @@ void loop() {
     stepper.run();  // non-blocking stepper driver function
     timerHandler(); // all controls timing
     registerLastLeverPress();
-    bufferedOut.nextByteOut();  // call this one or more times each loop() to release buffered chars
+    bufferedOut.nextByteOut();  // (NOT DOING ANYTHING NOW) call this one or more times each loop() to release buffered chars
     processUserInput();  // parsing control parameters
     feedSystem();  // background automotion pressurising system
 }

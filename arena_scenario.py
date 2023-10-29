@@ -53,20 +53,22 @@ with ServerSocket(host, port) as conn:
 
     # mov_live_plot = LiveLinePlot(nplots=3, ylim=(-1200, 1200))
     loop_ts = []
+    tss = []
 
     while not game_over:
         _start = time.time()
 
         # run VR devices
-        od.loop()
-        smooth_flo.loop()
-        rc_state = reward_circuit.loop(verbose=False)
-
-        # if rc_state and rc_state['LEV'] > 0:
-        #     print('lev:', rc_state['LEV'])
+        t = time.time()
+        od.loop()  # 3ms
+        smooth_flo.loop()  # TODO ! 24ms
+        rc_state = reward_circuit.loop(verbose=False)  # 6ms
+        t1 = time.time() - t
 
         # action
+        t = time.time()
         mov = smooth_flo.get_vel()
+        t2 = time.time() - t
         # mov_live_plot.update(time.time(), mov)
 
         lever = int(0 < rc_state['LEV'] < 100) if rc_state is not None else 0
@@ -74,31 +76,37 @@ with ServerSocket(host, port) as conn:
         action = (phys_mov, lever)
 
         # step
-        state, reward, terminated, truncated, info = doom.step(action)
+        t = time.time()
+        state, reward, terminated, truncated, info = doom.step(action)  # TODO ! 30 ms  !!! LOWER THE RES AND OTHER CHANGES, MAYBE TRY ASYNC AGAIN?
         game_over = terminated or truncated
         pm.loop(pos=np.array([state.position_x, state.position_y, state.angle]),
                 vel=np.array([state.velocity_x, state.velocity_y]))
+        t3 = time.time() - t
 
         # train
-        if reward > 0:
-            print('gameREWARD:', reward)
+        t = time.time()
         trainer.enforce_action(info['step_i'], state)
         reward += trainer.give_reward(info['step_i'], state)
+        t4 = time.time() - t
 
         # dispense rewards
+        t = time.time()
         puff_cmd = PiRewardCircuit.calc_puff_from_wall_bump(info['bump_angle'], info['bump_dist'], return_cmd=True)
         reward = max(0., reward)  # positive reinforcement only
         if reward > 0:
             print('REWARD:', reward)
         reward_circuit.update(valve_open_ms=reward, **puff_cmd)  # reward in ms for now
+        t5 = time.time() - t
 
         # benchmarking
         _end = time.time()
         if info['step_i'] > 50:
             loop_ts.append(_end - _start)
+            tss.append((t1, t2, t3, t4, t5))
 
         if info['step_i'] % 100 == 0:
             print('avg loop time:', np.mean(loop_ts) * 1000)
+            print('tss:', [np.mean(ti) * 1000 for ti in zip(*tss)])
             # plt.hist(loop_ts, bins=30)
             # plt.show()
 
