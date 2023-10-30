@@ -15,6 +15,8 @@ RPi.GPIO
 pmw3901
 pyserial
 
+# TODO in pmw3901 lib updated __init__.py: https://github.com/pimoroni/pmw3901-python/pull/16
+
 # setting up spi ports:
 #   sudo nano /boot/config.txt
 #   uncomment line "dtparam=spi=on"

@@ -42,7 +42,7 @@ class MotionSensor:  # on-ball movement tracking
         # store motion information
         if self._has_run_get_rel_motion:
             try:
-                x, y = self.sensor.get_motion(timeout=0.001)
+                x, y = self.sensor.get_motion(timeout=1e-3)
                 self._last_rec = time.time()
                 self.rel_x += x
                 self.rel_y += y
@@ -174,6 +174,7 @@ class SmoothMotion:  # MotionSensor wrapper
 
 def _main():  # example code with OmniDrive
 
+    # TODO review this test code
     from omni_drive import OmniDrive
 
     flo = MotionSensor(0, 1, 0)

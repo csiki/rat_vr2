@@ -19,7 +19,7 @@ class RewardCircuit:
     WAIT_TIME = .06  # sec
 
     def __init__(self, serial_port, init_pressure_setpoint=PRESSURE_SETPOINT, valve_ms_per_ul=VALVE_MS_PER_UL,
-                 run_on_sep_thread=True, auto_mixing_at_every=None, run_stat_in_every=0.1):
+                 run_on_sep_thread=True, auto_mixing_at_every=None, run_stat_in_every=0.2):
         self.pressure_setpoint = init_pressure_setpoint
         self.valve_ms_per_ul = valve_ms_per_ul
         # degree of bump to left/right where the opposite puffer is at 0

@@ -18,6 +18,7 @@ from gym.core import RenderFrame, ActType, ObsType
 class DOOM(gym.Env):
 
     DEFAULT_CFG = {
+        'is_async': False,
         'mode': Mode.PLAYER,
         'res': ScreenResolution.RES_1920X1080,
         'post_set_res': None,  # in the form 'width height'
@@ -167,6 +168,7 @@ class DOOM(gym.Env):
         step_start = time.time()
 
         # action
+        # ta=time.time()
         if self.cfg['mode'] == Mode.PLAYER:
             move, shoot = np.array(action[0]), action[1]  # cpy move before altered
             move[:2] = move[:2] / self.map_unit_per_cm  # / self.tic_per_sec * self.map_unit_per_cm
@@ -178,7 +180,13 @@ class DOOM(gym.Env):
             action = self.game.get_last_action()
             reward = self.game.get_last_reward()
         else:
-            raise NotImplemented('Async modes are not implemented!')
+            move, shoot = np.array(action[0]), action[1]  # cpy move before altered
+            move[:2] = move[:2] / self.map_unit_per_cm * 12  # / self.tic_per_sec * self.map_unit_per_cm
+            move[2] = move[2] * self.map_degree_per_rad * 4
+            action = move.tolist() + [shoot]
+            reward = self.game.make_action(action)
+
+        # print('ta', (time.time() - ta) * 1000)
 
         # get state
         state, game_over = self._get_state()

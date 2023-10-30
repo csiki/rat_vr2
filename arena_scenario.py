@@ -41,29 +41,32 @@ with ServerSocket(host, port) as conn:
     reward_circuit = PiRewardCircuit(conn, reward_serial_port, auto_mixing_at_every=5, run_on_sep_thread=True)
 
     # setup game
-    player_mode = vizdoom.Mode.PLAYER  # vizdoom.Mode.SPECTATOR | vizdoom.Mode.PLAYER
-    cfg_update = dict(fullscreen=True, win_visible=True, res=vizdoom.ScreenResolution.RES_1024X576,
+    is_async = True
+    player_mode = vizdoom.Mode.ASYNC_PLAYER if is_async else vizdoom.Mode.PLAYER
+    cfg_update = dict(is_async=is_async, fullscreen=True, win_visible=True, res=vizdoom.ScreenResolution.RES_1024X576,
                       mode=player_mode, render_msgs=False, fov=140, post_set_res=None)  # TODO 16:8 '1024 512' ?
     doom = DOOM('doom/scenarios/arena_lowered.wad', 'map01', cfg_update)
+    doom.game.set_ticrate(30)
     game_over = False
 
     # setup trainer
-    trainer = ManualTrainer(doom, od, reward_circuit, move_r_per_sec=20, kill_r=100,
-                            r_in_every=.5, min_r_given=10, omni_speed=.75)
+    trainer = ManualTrainer(doom, od, reward_circuit, move_r_per_sec=2, kill_r=100,
+                            r_in_every=.8, min_r_given=50, omni_speed=.75)
 
     # mov_live_plot = LiveLinePlot(nplots=3, ylim=(-1200, 1200))
-    loop_ts = []
-    tss = []
+    loop_ts, loop_tss = [], []
 
     while not game_over:
         _start = time.time()
 
         # run VR devices
         t = time.time()
-        od.loop()  # 3ms
-        smooth_flo.loop()  # TODO ! 24ms
-        rc_state = reward_circuit.loop(verbose=False)  # 6ms
+        od.loop()  # <2ms
+        smooth_flo.loop()  # <3ms
+        rc_state = reward_circuit.loop(verbose=False)  # 6ms  # TODO check what activates - i heard reward and other stuff on the reward circuit going off especially when character is moving
         t1 = time.time() - t
+
+        # TODO when pressing backspace it increases the omnidrive speed somehow
 
         # action
         t = time.time()
@@ -102,11 +105,12 @@ with ServerSocket(host, port) as conn:
         _end = time.time()
         if info['step_i'] > 50:
             loop_ts.append(_end - _start)
-            tss.append((t1, t2, t3, t4, t5))
+            loop_tss.append((t1, t2, t3, t4, t5))
 
         if info['step_i'] % 100 == 0:
             print('avg loop time:', np.mean(loop_ts) * 1000)
-            print('tss:', [np.mean(ti) * 1000 for ti in zip(*tss)])
+            print('tss:', [np.mean(ti) * 1000 for ti in zip(*loop_tss)])
+            tss, loop_tss = [], []
             # plt.hist(loop_ts, bins=30)
             # plt.show()
 
