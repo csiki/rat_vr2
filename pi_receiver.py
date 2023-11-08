@@ -41,6 +41,7 @@ def _sigint(*args):
 
 
 def main():
+    global _RUN
 
     # TODO argparse
     # remote pc/server address
@@ -129,7 +130,11 @@ def main():
 
             # issue response
             # print('->', (ret_val, exception))
-            sock.sendall(pickle.dumps((ret_val, exception, callback_ids_to_run)))
+            try:
+                sock.sendall(pickle.dumps((ret_val, exception, callback_ids_to_run)))
+            except ConnectionResetError as e:
+                print('Connection broke:', e, file=sys.stderr)
+                _RUN = False
 
     # optional cleanup on each device object
     for device_cls_i, cls in enumerate(device_clss):

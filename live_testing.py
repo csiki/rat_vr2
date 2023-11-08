@@ -21,7 +21,7 @@ from config import *
 
 from pi_wrapper import PiSmoothMotion, PiMotionSensor, PiMotionSensors, PiOmniDrive, PiFeedback, \
     PiPlayerMovement, ServerSocket, PiRewardCircuit
-from trainer import ArenaTrainer
+from trainer import ArenaTrainer, ManualTrainer
 from DOOM import DOOM
 from vizdoom import ScreenResolution
 
@@ -135,12 +135,9 @@ if __name__ == '__main__':
         pm = PlayerMovement(smooth_dt=.1)
 
         calibration_path = 'omni_calib.pckl'
-        od = PiOmniDrive(conn, auto_mounting=False, calib_path=calibration_path)
+        od = PiOmniDrive(conn, auto_mounting=False, mount_init=False, calib_path=calibration_path)
         od.setup()
         assert od.get('motion_per_cm') is not None and od.get('motion_per_rad') is not None
-
-        trainer = ArenaTrainer(cspace_path='arena_lowered.map01.pckl', omni_drive=od)  # TODO provide player_movement
-        artificial_train_mov = .5  # TODO 1. means movement is defined by omnidrive roll goal, not the sensed motion
 
         reward_circuit = PiRewardCircuit(conn, reward_serial_port, auto_mixing_at_every=10)
 
@@ -156,16 +153,21 @@ if __name__ == '__main__':
 
         # setup game
         player_mode = vizdoom.Mode.PLAYER  # vizdoom.Mode.SPECTATOR | vizdoom.Mode.PLAYER
-        cfg_update = {'fullscreen': False, 'res': ScreenResolution.RES_640X480, 'mode': player_mode}
+        cfg_update = {'is_async': False, 'fullscreen': False, 'res': ScreenResolution.RES_640X480, 'mode': player_mode}
         doom = DOOM('doom/scenarios/arena_lowered.wad', 'map01', cfg_update)
         game_over = False
+
+        # trainer = ArenaTrainer(cspace_path='arena_lowered.map01.pckl', omni_drive=od)  # TODO provide player_movement
+        # artificial_train_mov = .5  # TODO 1. means movement is defined by omnidrive roll goal, not the sensed motion
+        trainer = ManualTrainer(doom, od, reward_circuit, move_r_per_sec=2, kill_r=100,
+                                r_in_every=.8, min_r_given=50, omni_speed=.75)
 
         while not game_over:
 
             # run VR devices
             od.loop()
             smooth_flo.loop()
-            rc_state = reward_circuit.loop()  # TODO TEST !!!
+            rc_state = reward_circuit.loop()
 
             # smooth_flo1.loop()
             # smooth_flo2.loop()
@@ -194,6 +196,9 @@ if __name__ == '__main__':
             t = time.time()
             # mov_1_lp.update(t, mov1)
             # mov_2_lp.update(t, mov2)
+
+            trainer.enforce_action(info['step_i'], state)
+            reward += trainer.give_reward(info['step_i'], state)
 
             smooth_mov_lp.update(t, mov)
             phys_mov_lp.update(t, phys_mov * [1, 1, 180/np.pi])

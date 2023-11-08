@@ -4,6 +4,7 @@ import traceback
 
 import matplotlib.pyplot as plt
 import numpy as np
+from collections import deque
 
 import vizdoom
 from DOOM import DOOM
@@ -54,7 +55,7 @@ with ServerSocket(host, port) as conn:
                             r_in_every=.8, min_r_given=50, omni_speed=.75)
 
     # mov_live_plot = LiveLinePlot(nplots=3, ylim=(-1200, 1200))
-    loop_ts, loop_tss = [], []
+    loop_ts, loop_tss = deque([], 100), deque([], 100)
 
     while not game_over:
         _start = time.time()
@@ -63,10 +64,10 @@ with ServerSocket(host, port) as conn:
         t = time.time()
         od.loop()  # <2ms
         smooth_flo.loop()  # <3ms
-        rc_state = reward_circuit.loop(verbose=False)  # 6ms  # TODO check what activates - i heard reward and other stuff on the reward circuit going off especially when character is moving
+        rc_state = reward_circuit.loop(verbose=False)  # >6ms
         t1 = time.time() - t
 
-        # TODO when pressing backspace it increases the omnidrive speed somehow
+        # TODO when pressing the backwards btn it increases the omnidrive speed somehow
 
         # action
         t = time.time()
@@ -80,7 +81,7 @@ with ServerSocket(host, port) as conn:
 
         # step
         t = time.time()
-        state, reward, terminated, truncated, info = doom.step(action)  # TODO ! 30 ms  !!! LOWER THE RES AND OTHER CHANGES, MAYBE TRY ASYNC AGAIN?
+        state, reward, terminated, truncated, info = doom.step(action)
         game_over = terminated or truncated
         pm.loop(pos=np.array([state.position_x, state.position_y, state.angle]),
                 vel=np.array([state.velocity_x, state.velocity_y]))
@@ -110,7 +111,6 @@ with ServerSocket(host, port) as conn:
         if info['step_i'] % 100 == 0:
             print('avg loop time:', np.mean(loop_ts) * 1000)
             print('tss:', [np.mean(ti) * 1000 for ti in zip(*loop_tss)])
-            tss, loop_tss = [], []
             # plt.hist(loop_ts, bins=30)
             # plt.show()
 

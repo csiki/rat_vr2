@@ -19,6 +19,7 @@ class DOOM(gym.Env):
 
     DEFAULT_CFG = {
         'is_async': False,
+        'fps': 30,
         'mode': Mode.PLAYER,
         'res': ScreenResolution.RES_1920X1080,
         'post_set_res': None,  # in the form 'width height'
@@ -91,6 +92,8 @@ class DOOM(gym.Env):
         self.game.set_automap_mode(AutomapMode.OBJECTS_WITH_SIZE)
 
         self.game.set_mode(self.cfg['mode'])
+        if self.cfg['is_async']:
+            self.game.set_ticrate(int(self.cfg['fps']))
 
         buttons = self.cfg['buttons']
         if self.cfg['mode'] == Mode.SPECTATOR:  # add btns for keyboard input to work
@@ -141,6 +144,7 @@ class DOOM(gym.Env):
 
         self.step_i = None
         self.start_ammo = None
+        self.t_prev_loop = time.time()
 
     def _after_game_init(self):
         self.game.advance_action(self.cfg['skiprate'])  # run it for 1 iter
@@ -166,12 +170,14 @@ class DOOM(gym.Env):
 
     def step(self, action: ActType) -> Tuple[ObsType, float, bool, bool, dict]:
         step_start = time.time()
+        t_loop = time.time() - self.t_prev_loop
+        self.t_prev_loop = time.time()
 
         # action
         # ta=time.time()
         if self.cfg['mode'] == Mode.PLAYER:
             move, shoot = np.array(action[0]), action[1]  # cpy move before altered
-            move[:2] = move[:2] / self.map_unit_per_cm  # / self.tic_per_sec * self.map_unit_per_cm
+            move[:2] = move[:2] / self.map_unit_per_cm #* t_loop * 1000  # / self.tic_per_sec * self.map_unit_per_cm
             move[2] = move[2] * self.map_degree_per_rad
             action = move.tolist() + [shoot]
             reward = self.game.make_action(action, self.cfg['skiprate'])
@@ -179,9 +185,9 @@ class DOOM(gym.Env):
             self.game.advance_action()
             action = self.game.get_last_action()
             reward = self.game.get_last_reward()
-        else:
+        else:  # ASYNC
             move, shoot = np.array(action[0]), action[1]  # cpy move before altered
-            move[:2] = move[:2] / self.map_unit_per_cm * 12  # / self.tic_per_sec * self.map_unit_per_cm
+            move[:2] = move[:2] / self.map_unit_per_cm * 12  # * t_loop * 1000  # / self.tic_per_sec * self.map_unit_per_cm
             move[2] = move[2] * self.map_degree_per_rad * 4
             action = move.tolist() + [shoot]
             reward = self.game.make_action(action)

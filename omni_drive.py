@@ -45,7 +45,7 @@ class OmniDrive:
                                                  'left_turn': [0., 0., -1.], 'right_turn': [0., 0., 1.]}.items()}
 
     def __init__(self, roller_pins=ROLLER_PINS, lin_act_pins=LIN_ACT_PINS, up_trans_t=4, down_trans_t=4,
-                 auto_mounting=False, mount_init=True, pwm_freq=100, calib_path=None):
+                 auto_mounting=False, mount_init=False, pwm_freq=100, calib_path=None):
 
         self.roller_dirs = np.array(['left', 'right'])
         # self.simple_dirs_v = {'forward': [1., 0., 0.], 'backward': [-1., 0., 0.],  # v, vn, w
