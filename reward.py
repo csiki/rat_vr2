@@ -19,7 +19,7 @@ class RewardCircuit:
     WAIT_TIME = .06  # sec
 
     def __init__(self, serial_port, init_pressure_setpoint=PRESSURE_SETPOINT, valve_ms_per_ul=VALVE_MS_PER_UL,
-                 run_on_sep_thread=True, auto_mixing_at_every=None, run_stat_in_every=0.2):
+                 run_on_sep_thread=True, auto_mixing_at_every=None, run_stat_in_every=0.2, puff_def_dur=10000):
         self.pressure_setpoint = init_pressure_setpoint
         self.valve_ms_per_ul = valve_ms_per_ul
         # degree of bump to left/right where the opposite puffer is at 0
@@ -34,12 +34,18 @@ class RewardCircuit:
         self.rc_state_mut = []
         self.do_stop = False
         self.pressure_setpoint_changed = False
+        self.left_blow_ms_changed = False
+        self.right_blow_ms_changed = False
 
         self.run_stat_in_every = run_stat_in_every
         self.stat_last_run = 0
+        self.puff_def_dur = puff_def_dur
 
         # buffer variables
-        self._reset(init_pressure_setpoint)
+        self.pressure_setpoint = init_pressure_setpoint
+        self.left_blow_ms = 0
+        self.right_blow_ms = 0
+        self._reset()
 
         # threading
         self.run_on_sep_thread = run_on_sep_thread
@@ -50,16 +56,27 @@ class RewardCircuit:
         self.update(pressure_setpoint=init_pressure_setpoint)
 
     def update(self, valve_open_ms=0, pressure_setpoint=None, pump_override_ctrl=0,
-               left_blow_ms=0, right_blow_ms=0, press_lever_ms=0, mixer_turns=0):
-        if pressure_setpoint is not None:
-            self.pressure_setpoint_changed = True
+               left_blow=False, right_blow=False, press_lever_ms=0, mixer_turns=0):
+
         self.valve_open_ms = self.valve_open_ms + valve_open_ms
         self.pressure_setpoint = pressure_setpoint if pressure_setpoint is not None else self.pressure_setpoint
         self.pump_override_ctrl = pump_override_ctrl
-        self.left_blow_ms = max(self.left_blow_ms, left_blow_ms)
-        self.right_blow_ms = max(self.right_blow_ms, right_blow_ms)
         self.press_lever_ms = max(self.press_lever_ms, press_lever_ms)
         self.mixer_turns = max(self.mixer_turns, mixer_turns)
+
+        # changed or not state machines
+        if pressure_setpoint is not None:
+            self.pressure_setpoint_changed = True
+
+        updated_left_blow_ms = left_blow * self.puff_def_dur
+        updated_right_blow_ms = right_blow * self.puff_def_dur
+        if self.left_blow_ms != updated_left_blow_ms:
+            self.left_blow_ms_changed = True
+        if self.right_blow_ms != updated_right_blow_ms:
+            self.right_blow_ms_changed = True
+
+        self.left_blow_ms = updated_left_blow_ms
+        self.right_blow_ms = updated_right_blow_ms
 
     def loop(self, verbose=False):
         if self.auto_mixing_at_every and self.mixer_turns == 0 \
@@ -67,8 +84,11 @@ class RewardCircuit:
             self.last_mixing = time.time()
             self.mixer_turns = 5
 
-        nothing_todo = (self.valve_open_ms + self.left_blow_ms + self.right_blow_ms + self.pump_override_ctrl +
-                        self.press_lever_ms + self.mixer_turns) == 0 and not self.pressure_setpoint_changed
+        nothing_todo = (self.valve_open_ms + self.pump_override_ctrl + self.press_lever_ms + self.mixer_turns) == 0 \
+                       and not self.pressure_setpoint_changed \
+                       and not self.left_blow_ms_changed and not self.right_blow_ms_changed
+        if not nothing_todo:
+            print(self.left_blow_ms_changed, self.right_blow_ms_changed)
 
         proc = None
         if self.do_stop:
@@ -98,7 +118,7 @@ class RewardCircuit:
         else:
             proc()
 
-        self._reset(self.pressure_setpoint)
+        self._reset()
         return self.rc_state
 
     def _stat(self, verbose=False, rc_state_out: list = None):
@@ -154,16 +174,21 @@ class RewardCircuit:
 
         return rc_state
 
-    def _reset(self, init_pressure_setpoint=PRESSURE_SETPOINT):
+    def _reset(self):
         self.valve_open_ms = 0
-        self.pressure_setpoint = init_pressure_setpoint
         self.pump_override_ctrl = 0
-        self.left_blow_ms = 0
-        self.right_blow_ms = 0
         self.press_lever_ms = 0
         self.mixer_turns = 0
+
         self.do_stop = False
         self.pressure_setpoint_changed = False
+        self.left_blow_ms_changed = False
+        self.right_blow_ms_changed = False
+
+        # # binary state machine variables are not updated at every reset
+        # self.pressure_setpoint = init_pressure_setpoint
+        # self.left_blow_ms = 0
+        # self.right_blow_ms = 0
 
     def open_valve(self, ms: int = None, ul: int = None):
         assert (ms is None) ^ (ul is None)
@@ -171,8 +196,7 @@ class RewardCircuit:
         self.update(valve_open_ms=ms)
 
     @staticmethod
-    def calc_puff_from_wall_bump(b_angle, b_distance, puff_delta_share_degree=10, puff_within_distance=1,
-                                 puff_base_dur=100, return_cmd=False):
+    def calc_puff_from_wall_bump(b_angle, b_distance, puff_delta_share_degree=10, puff_within_distance=1):
         # puff rules: at 0 degree both left and right blows at max=1
         #   from -puff_delta_share_degree to 0, a gradient of blow from right from 0 to 1
         #   from puff_delta_share_degree to 0, a gradient of blow from left from 0 to 1
@@ -185,10 +209,6 @@ class RewardCircuit:
 
         # linear puff strength from 0 to 1, by puff_within_distance distance to 0
         puff_dist_scaler = max(0, 1 - b_distance / puff_within_distance)
-
-        if return_cmd:
-            return dict(left_blow_ms=puff_base_dur * left_puff * puff_dist_scaler,
-                        right_blow_ms=puff_base_dur * right_puff * puff_dist_scaler)
         return left_puff * puff_dist_scaler, right_puff * puff_dist_scaler
 
     def stop(self):

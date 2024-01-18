@@ -418,7 +418,7 @@ class ManualTrainer(Trainer):
                 self.lever_pulled_at = time.time()
 
             if self.reward_circuit is not None and keyboard.is_pressed(ManualTrainer.KEY_REWARD):
-                self.man_reward = ManualTrainer.GIVE_MAN_REWARD_FOR
+                self.man_relocal_man_driveward = ManualTrainer.GIVE_MAN_REWARD_FOR
 
     def enforce_action(self, step_i, state):
         if not self.enforce_called:  # first call

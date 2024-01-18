@@ -67,8 +67,6 @@ with ServerSocket(host, port) as conn:
         rc_state = reward_circuit.loop(verbose=False)  # >6ms
         t1 = time.time() - t
 
-        # TODO when pressing the backwards btn it increases the omnidrive speed somehow
-
         # action
         t = time.time()
         mov = smooth_flo.get_vel()
@@ -95,11 +93,11 @@ with ServerSocket(host, port) as conn:
 
         # dispense rewards
         t = time.time()
-        puff_cmd = PiRewardCircuit.calc_puff_from_wall_bump(info['bump_angle'], info['bump_dist'], return_cmd=True)
         reward = max(0., reward)  # positive reinforcement only
+        left_blow, right_blow = PiRewardCircuit.calc_puff_from_wall_bump(info['bump_angle'], info['bump_dist'])
         if reward > 0:
             print('REWARD:', reward)
-        reward_circuit.update(valve_open_ms=reward, **puff_cmd)  # reward in ms for now
+        reward_circuit.update(valve_open_ms=reward, left_blow=left_blow > 0, right_blow=right_blow > 0)
         t5 = time.time() - t
 
         # benchmarking
