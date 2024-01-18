@@ -1,9 +1,10 @@
 import sys
 import time
-
 import serial
 from functools import reduce
 import threading
+import sshkeyboard
+
 from config import *
 
 # Data format: $DOOM,[Valve Open Millisec(int)],[Pressure SetPoint(float)],
@@ -87,8 +88,6 @@ class RewardCircuit:
         nothing_todo = (self.valve_open_ms + self.pump_override_ctrl + self.press_lever_ms + self.mixer_turns) == 0 \
                        and not self.pressure_setpoint_changed \
                        and not self.left_blow_ms_changed and not self.right_blow_ms_changed
-        if not nothing_todo:
-            print(self.left_blow_ms_changed, self.right_blow_ms_changed)
 
         proc = None
         if self.do_stop:
@@ -227,3 +226,38 @@ class RewardCircuit:
         if self.thread is not None and self.thread.is_alive():
             self.thread.join()
         self.ser.close()
+
+
+def flow_through():
+    serial_port = '/dev/ttyACM0'
+    reward_circuit = RewardCircuit(serial_port, auto_mixing_at_every=5, init_pressure_setpoint=10)
+    open_for = 10000  # ms
+    print('press space to start flow, press again to stop; press esc to quit..')
+
+    class _reward_key_listener:
+        def __init__(self, reward_circuit):
+            self.flowing = False
+            self.reward_circuit = reward_circuit
+            sshkeyboard.listen_keyboard(on_press=self._press)
+
+        def _press(self, key):
+            if key == 'space':
+                if self.flowing:
+                    self.reward_circuit.stop()
+                    print('..stopped')
+                else:
+                    self.reward_circuit.update(valve_open_ms=open_for)
+                    print('..started')
+
+                self.reward_circuit.loop()
+                self.flowing = not self.flowing
+
+    _reward_key_listener(reward_circuit)
+    reward_circuit.cleanup()
+
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == 'flow':
+        flow_through()
+    else:
+        print('type `python reward.py flow` to start filling/draining the water tubes')

@@ -347,19 +347,21 @@ class ManualTrainer(Trainer):
     KILL_HAPPENS_WITHIN = 3  # sec after lever pull
     KEY_SHOOT = '.'  # key to be used for manual shooting
     PRESS_LEVER_FOR = 600  # ms
-    KEY_REWARD = 'r'  # gives reward
-    GIVE_MAN_REWARD_FOR = 100  # ms
+    KEY_REWARD = 'R'  # gives reward
 
     def __init__(self, game: DOOM, omni_drive: OmniDrive, reward_circuit: RewardCircuit,
-                 move_r_per_sec: float, kill_r: float, r_in_every: float, min_r_given: float = 10., omni_speed=.7):
+                 move_r_per_sec: float, kill_r: float, r_in_every: float, min_r_given: float = 10., man_r=50,
+                 omni_speed=.7):
         super().__init__(cspace_path=None, omni_drive=omni_drive)
         self.game = game
         self.omni_drive = omni_drive
+        self.omni_speed = omni_speed
         self.reward_circuit = reward_circuit
         self.move_r_per_sec = move_r_per_sec
         self.kill_r = kill_r
         self.r_in_every = r_in_every  # sec
         self.min_r_given = min_r_given
+        self.man_r = man_r
 
         self.man_drive = None
         self.enforce_called = False
@@ -381,7 +383,7 @@ class ManualTrainer(Trainer):
         #   have keys to increase/decrease speed
 
     def _setup_man_drive(self):
-        self.man_drive = local_man_drive(self.omni_drive)  # omni_drive should be a PiOmniDrive
+        self.man_drive = local_man_drive(self.omni_drive, self.omni_speed)  # omni_drive should be a PiOmniDrive
 
     def give_reward(self, step_i, state):
         r = 0.
@@ -418,7 +420,7 @@ class ManualTrainer(Trainer):
                 self.lever_pulled_at = time.time()
 
             if self.reward_circuit is not None and keyboard.is_pressed(ManualTrainer.KEY_REWARD):
-                self.man_relocal_man_driveward = ManualTrainer.GIVE_MAN_REWARD_FOR
+                self.man_reward = self.man_r
 
     def enforce_action(self, step_i, state):
         if not self.enforce_called:  # first call

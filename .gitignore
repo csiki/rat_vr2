@@ -1,7 +1,7 @@
 venv/
 .idea/
 tmp/
-tmp.py
+tmp*.py
 *.pckl
 __pycache__/
 _vizdoom.ini
