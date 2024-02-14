@@ -46,14 +46,14 @@ with ServerSocket(host, port) as conn:
     is_async = True
     player_mode = vizdoom.Mode.ASYNC_PLAYER if is_async else vizdoom.Mode.PLAYER
     cfg_update = dict(is_async=is_async, fullscreen=True, win_visible=True, res=vizdoom.ScreenResolution.RES_1024X576,
-                      mode=player_mode, render_msgs=False, fov=140, post_set_res=None)  # TODO 16:8 '1024 512' ?
+                      mode=player_mode, render_msgs=False, fov=140, post_set_res=None, repos_win=(1920, 0))
     doom = DOOM('doom/scenarios/arena_lowered.wad', 'map01', cfg_update)
     doom.game.set_ticrate(30)
     game_over = False
 
     # setup trainer
     trainer = ManualTrainer(doom, od, reward_circuit, move_r_per_sec=1, kill_r=30, man_r=30,
-                            r_in_every=.8, min_r_given=10, omni_speed=.75)
+                            r_in_every=.8, min_r_given=10, omni_speed=.7, no_reward=False)
 
     # mov_live_plot = LiveLinePlot(nplots=3, ylim=(-1200, 1200))
     loop_ts, loop_tss = deque([], 100), deque([], 100)

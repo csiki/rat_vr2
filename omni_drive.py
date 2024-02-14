@@ -851,10 +851,10 @@ def local_man_drive(omni_drive: OmniDrive, init_speed=.7):
             # (un)mount
             if keyboard.is_pressed('space'):
                 if self.omni_drive.is_mounted():
-                    self.omni_drive.letgo()
+                    self.omni_drive.letgo(blocking=True)
                     mount_state = 'letgo'
                 else:  # was not mounted
-                    self.omni_drive.mount()
+                    self.omni_drive.mount(blocking=True)
                     mount_state = 'mounted'
 
             max_move = np.abs(current_dir).max()

@@ -1,3 +1,4 @@
+import sys
 from typing import Optional, Union, List, Tuple
 import time
 from types import SimpleNamespace
@@ -6,6 +7,7 @@ import numpy as np
 import gym
 import vizdoom
 from vizdoom import DoomGame, Button, GameVariable, ScreenFormat, ScreenResolution, AutomapMode, Mode
+import pygetwindow as gw
 
 
 # minimize sliding: https://forum.zdoom.org/viewtopic.php?p=933227&sid=fdef5121aec04509a2b76c8048ea5cc5#p933227
@@ -25,6 +27,7 @@ class DOOM(gym.Env):
         'post_set_res': None,  # in the form 'width height'
         'win_visible': True,
         'fullscreen': True,
+        'repos_win': (0, 0),
         'render_hud': False,
         'render_msgs': True,
         'automap': False,
@@ -77,7 +80,7 @@ class DOOM(gym.Env):
         self.game.set_render_hud(self.cfg['render_hud'])
         self.game.set_render_messages(self.cfg['render_msgs'])
         # self.game.add_game_args("-width 3440 -height 1440")  # -record recordings
-        self.game.add_game_args(f'+fullscreen 1 +viz_nocheat 0 +fullscreen {[0, 1][self.cfg["fullscreen"]]} +freelook 1')
+        self.game.add_game_args(f'+fullscreen {[0, 1][self.cfg["fullscreen"]]} +freelook 1 +viz_nocheat 0')
         # self.game.add_game_args('+snd_mididevice -1 +snd_midipatchset /media/viktor/OS/csiki/rats_play_doom/doom/gm.dls')
         self.game.set_sound_enabled(True)  # TODO crashes because of old 1.19 openal version that sticks to vizdoom somewhow
 
@@ -149,8 +152,13 @@ class DOOM(gym.Env):
     def _after_game_init(self):
         self.game.advance_action(self.cfg['skiprate'])  # run it for 1 iter
         self.game.send_game_command(f'fov {self.cfg["fov"]}')
+        # self.game.send_game_command(f'vid_adapter {self.cfg["vid_adapter"]}')
+        # self.game.send_game_command(f'fullscreen 1')
         if self.cfg['post_set_res'] is not None:
             self.game.send_game_command(f'vid_setmode {self.cfg["post_set_res"]}')
+
+        if self.cfg['repos_win']:
+            self._move_and_maximize_window('VIZDOOM', self.cfg['repos_win'], self.cfg['fullscreen'])
 
     def _get_state(self):
         state = self.game.get_state()
@@ -230,6 +238,22 @@ class DOOM(gym.Env):
 
     def close(self):
         self.game.close()
+
+    @staticmethod
+    def _move_and_maximize_window(win_name_prefix='VIZDOOM', repos_win=(0, 0), fullscreen=False):
+        windows = gw.getAllWindows()
+        target_window = None
+        for window in windows:
+            if window.title.startswith(win_name_prefix):
+                target_window = window
+                break
+
+        if target_window:
+            target_window.moveTo(*repos_win)
+            if fullscreen:
+                target_window.maximize()
+        else:
+            print(f'no window found starting with "{win_name_prefix}"', file=sys.stderr)
 
 
 def doom_test():

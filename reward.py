@@ -220,11 +220,11 @@ class RewardCircuit:
         self.ser.write(str.encode(cmd))
 
     def cleanup(self):
-        self.stop()
-        self.loop()
-        time.sleep(0.5)
         if self.thread is not None and self.thread.is_alive():
             self.thread.join()
+        self._stop()
+        # self.loop()
+        time.sleep(0.5)
         self.ser.close()
 
 

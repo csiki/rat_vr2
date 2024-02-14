@@ -14,6 +14,7 @@ vizdoom
 RPi.GPIO
 pmw3901
 pyserial
+PyGetWindow
 
 # TODO in pmw3901 lib updated __init__.py: https://github.com/pimoroni/pmw3901-python/pull/16
 

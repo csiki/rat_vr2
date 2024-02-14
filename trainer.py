@@ -351,7 +351,7 @@ class ManualTrainer(Trainer):
 
     def __init__(self, game: DOOM, omni_drive: OmniDrive, reward_circuit: RewardCircuit,
                  move_r_per_sec: float, kill_r: float, r_in_every: float, min_r_given: float = 10., man_r=50,
-                 omni_speed=.7):
+                 omni_speed=.7, no_reward=False):
         super().__init__(cspace_path=None, omni_drive=omni_drive)
         self.game = game
         self.omni_drive = omni_drive
@@ -362,6 +362,7 @@ class ManualTrainer(Trainer):
         self.r_in_every = r_in_every  # sec
         self.min_r_given = min_r_given
         self.man_r = man_r
+        self.no_reward = no_reward
 
         self.man_drive = None
         self.enforce_called = False
@@ -404,7 +405,7 @@ class ManualTrainer(Trainer):
         r += self.man_reward
         self.man_reward = 0
 
-        return r
+        return r if not self.no_reward else 0
 
     def _enforce_loop(self):
         if self.keep_enforcing:
