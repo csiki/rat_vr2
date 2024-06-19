@@ -21,7 +21,7 @@ from pi_wrapper import PiSmoothMotion, PiMotionSensor, PiMotionSensors, PiOmniDr
 
 
 # pc/server address
-host, port = '192.168.0.129', 4444  # TODO as cmd argument or feel automatically
+host, port = '192.168.1.74', 4444  # TODO as cmd argument or feel automatically
 reward_serial_port = '/dev/ttyACM0'  # ttyACM0
 
 with ServerSocket(host, port) as conn:
@@ -39,7 +39,8 @@ with ServerSocket(host, port) as conn:
     od.setup()
     assert od.get('motion_per_cm') is not None and od.get('motion_per_rad') is not None
 
-    reward_circuit = PiRewardCircuit(conn, reward_serial_port, auto_mixing_at_every=5, init_pressure_setpoint=5,
+    reward_circuit = PiRewardCircuit(conn, reward_serial_port, auto_mixing_at_every=5,
+                                     init_pressure_setpoint=1,  # TODO
                                      run_on_sep_thread=True)
 
     # setup game
@@ -52,8 +53,8 @@ with ServerSocket(host, port) as conn:
     game_over = False
 
     # setup trainer
-    trainer = ManualTrainer(doom, od, reward_circuit, move_r_per_sec=1, kill_r=30, man_r=30,
-                            r_in_every=.8, min_r_given=10, omni_speed=.7, no_reward=False)
+    trainer = ManualTrainer(doom, od, reward_circuit, move_r_per_sec=1, kill_r=30, man_r=10, # TODO
+                            r_in_every=.8, min_r_given=10, omni_speed=.75, no_reward=False)
 
     # mov_live_plot = LiveLinePlot(nplots=3, ylim=(-1200, 1200))
     loop_ts, loop_tss = deque([], 100), deque([], 100)
