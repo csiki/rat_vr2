@@ -118,7 +118,7 @@ class LiveLinePlot:
 if __name__ == '__main__':
 
     # pc/server address
-    host, port = '192.168.0.129', 4444  # TODO as cmd argument
+    host, port = '192.168.1.74', 4444  # TODO as cmd argument
     reward_serial_port = '/dev/ttyACM0'
 
     with ServerSocket(host, port) as conn:
@@ -153,7 +153,8 @@ if __name__ == '__main__':
 
         # setup game
         player_mode = vizdoom.Mode.PLAYER  # vizdoom.Mode.SPECTATOR | vizdoom.Mode.PLAYER
-        cfg_update = {'is_async': False, 'fullscreen': False, 'res': ScreenResolution.RES_640X480, 'mode': player_mode}
+        cfg_update = {'is_async': False, 'fullscreen': False, 'res': vizdoom.ScreenResolution.RES_1024X576,
+                      'mode': player_mode, 'render_msgs': False, 'fov': 140}
         doom = DOOM('doom/scenarios/arena_lowered.wad', 'map01', cfg_update)
         game_over = False
 

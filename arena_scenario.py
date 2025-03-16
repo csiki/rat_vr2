@@ -1,7 +1,7 @@
 import socket
+import sys
 import time
 import traceback
-
 import matplotlib.pyplot as plt
 import numpy as np
 from collections import deque
@@ -21,8 +21,12 @@ from pi_wrapper import PiSmoothMotion, PiMotionSensor, PiMotionSensors, PiOmniDr
 
 
 # pc/server address
-host, port = '192.168.1.74', 4444  # TODO as cmd argument or feel automatically
-reward_serial_port = '/dev/ttyACM0'  # ttyACM0
+if len(sys.argv) != 4:
+    print('correct usage: python arena_scenario.py <raspberry_ip> <raspberry port> <reward_circuit_serial_port>\n'
+          'e.g.: python arena_scenario.py 192.168.1.74 4444 /dev/ttyACM0')
+
+host, port = sys.argv[1], int(sys.argv[2])
+reward_serial_port = sys.argv[3]
 
 with ServerSocket(host, port) as conn:
 
@@ -56,9 +60,9 @@ with ServerSocket(host, port) as conn:
     trainer = ManualTrainer(doom, od, reward_circuit, move_r_per_sec=1, kill_r=30, man_r=10, # TODO
                             r_in_every=.8, min_r_given=10, omni_speed=.75, no_reward=False)
 
-    # mov_live_plot = LiveLinePlot(nplots=3, ylim=(-1200, 1200))
+    mov_live_plot = LiveLinePlot(nplots=3, ylim=(-1200, 1200))
     loop_ts, loop_tss = deque([], 100), deque([], 100)
-
+    reward_circuit.update(pressure_setpoint=90)
     while not game_over:
         _start = time.time()
 
@@ -73,11 +77,13 @@ with ServerSocket(host, port) as conn:
         t = time.time()
         mov = smooth_flo.get_vel()
         t2 = time.time() - t
-        # mov_live_plot.update(time.time(), mov)
+        mov_live_plot.update(time.time(), mov)
 
         lever = int(0 < rc_state['LEV'] < 100) if rc_state is not None else 0
         phys_mov = od.motion_to_phys(mov)
         action = (phys_mov, lever)
+
+        # print('mov', mov, phys_mov)
 
         # step
         t = time.time()

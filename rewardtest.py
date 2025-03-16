@@ -9,14 +9,10 @@ serial_port = '/dev/ttyACM0'
 
 with ServerSocket(host, port) as conn:
     reward_circuit = PiRewardCircuit(conn, serial_port)
-
-    for i in range(100):
-        print('pump', i)
-        s_ = time.time()
-        reward_circuit.update(pressure_setpoint=15)
-        reward_circuit.loop()
-        time.sleep(5)
-        while time.time() - s_ < 5.:
-            reward_circuit.valve_open_ms=5000
-            reward_circuit.loop()
-            time.sleep(0.001)
+reward_circuit.update(pressure_setpoint=0)
+for i in range(100):
+    print('pump', i)
+    s_ = time.time()
+    reward_circuit.update(valve_open_ms=2000)
+    reward_circuit.loop()
+    time.sleep(4)

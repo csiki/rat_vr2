@@ -185,7 +185,7 @@ class DOOM(gym.Env):
         # ta=time.time()
         if self.cfg['mode'] == Mode.PLAYER:
             move, shoot = np.array(action[0]), action[1]  # cpy move before altered
-            move[:2] = move[:2] / self.map_unit_per_cm #* t_loop * 1000  # / self.tic_per_sec * self.map_unit_per_cm
+            move[:2] = move[:2] / self.map_unit_per_cm   # * t_loop * 1000  # / self.tic_per_sec * self.map_unit_per_cm
             move[2] = move[2] * self.map_degree_per_rad
             action = move.tolist() + [shoot]
             reward = self.game.make_action(action, self.cfg['skiprate'])
@@ -195,7 +195,7 @@ class DOOM(gym.Env):
             reward = self.game.get_last_reward()
         else:  # ASYNC
             move, shoot = np.array(action[0]), action[1]  # cpy move before altered
-            move[:2] = move[:2] / self.map_unit_per_cm * 12  # * t_loop * 1000  # / self.tic_per_sec * self.map_unit_per_cm
+            move[:2] = move[:2] / self.map_unit_per_cm * 12   # * t_loop * 1000  # / self.tic_per_sec * self.map_unit_per_cm
             move[2] = move[2] * self.map_degree_per_rad * 4
             action = move.tolist() + [shoot]
             reward = self.game.make_action(action)
@@ -249,7 +249,8 @@ class DOOM(gym.Env):
                 break
 
         if target_window:
-            target_window.moveTo(*repos_win)
+            # target_window.activate()
+            # target_window.moveTo(*repos_win)  # TODO gets stuck here
             if fullscreen:
                 target_window.maximize()
         else:
